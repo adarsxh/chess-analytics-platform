@@ -1,0 +1,250 @@
+# Architecture Decision Records
+
+Each significant decision is recorded here and never silently edited. If a decision
+changes, add a new ADR that **supersedes** the old one and mark the old one accordingly.
+
+**Status values:** Proposed · Accepted · Superseded by ADR-XXX · Deprecated
+
+**Template**
+
+```
+## ADR-XXX: Title
+- Status / Date
+### Context        what problem forced a decision
+### Decision       what we chose
+### Alternatives   what else we considered
+### Consequences   trade-offs; what this enables and what it restricts
+```
+
+---
+
+## ADR-001: Modular monolith
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+We need clear separation between ingestion, parsing, engine analysis, analytics, storage
+and the API, and room to grow. The team is a single developer.
+
+### Decision
+One Python codebase with one package per component and an inward dependency rule
+(see ARCHITECTURE.md). It runs as two backend processes, API and worker, built from
+the same code.
+
+### Alternatives
+- **Microservices:** independent deployment and scaling, but network calls, distributed
+  failures and operational overhead with no requirement justifying them.
+- **Single script / notebook:** fastest to start, but no boundaries; every extension
+  becomes a rewrite.
+
+### Consequences
+- (+) Simple to develop, test and deploy; refactoring across components is cheap.
+- (+) Clean module boundaries mean a component could be extracted into a service later.
+- (−) Boundaries are enforced by convention and review, not by the network. We may add
+  an import-linting rule later.
+
+---
+
+## ADR-002: PostgreSQL as the primary datastore
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+The API and the worker write concurrently. We need raw payload storage, transactional
+upserts for idempotency, and a database that will still fit multi-user V4/V5.
+
+### Decision
+PostgreSQL (Docker locally, managed later). Raw payloads stored as `JSONB`.
+Schema managed with Alembic migrations.
+
+### Alternatives
+- **DuckDB:** excellent analytics engine, but allows only one writing process. The API
+  and the worker would conflict over the file lock. Better suited as a future analytics
+  or export layer.
+- **SQLite:** simplest, but same weakness with concurrent writes; outgrown by V4.
+
+### Consequences
+- (+) Concurrency, transactions, JSONB, `SKIP LOCKED` queue (ADR-003), clear path to managed Postgres.
+- (−) Docker required from day one; tests need a real Postgres (CI service container).
+- Future: Parquet/DuckDB/Delta can be added as *derived* analytics stores without
+  replacing Postgres as the system of record.
+
+---
+
+## ADR-003: Postgres-backed job queue with a separate worker
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+Ingesting archives takes seconds to minutes; analysing a game with Stockfish takes
+roughly 10–60 s. This cannot happen inside an HTTP request.
+
+### Decision
+A `jobs` table in Postgres. Workers claim jobs with
+`SELECT … FOR UPDATE SKIP LOCKED`, and record status, attempts and errors. A separate
+worker process runs the job loop.
+
+### Alternatives
+- **FastAPI `BackgroundTasks`:** jobs lost on restart; work competes with request handling;
+  cannot scale separately.
+- **Celery + Redis:** mature and feature-rich, but adds a broker service and operational
+  complexity before we need it.
+- **CLI only:** simple, but no asynchronous UX from the frontend.
+
+### Consequences
+- (+) No extra infrastructure; jobs are durable and visible with plain SQL.
+- (+) Horizontal scaling: run more worker processes; `SKIP LOCKED` prevents double-claiming.
+- (−) We implement retries, timeouts and stale-job recovery ourselves.
+- (−) Polling adds small latency and DB load; fine at our scale.
+- Future: the `jobs` interface can be backed by Celery or a cloud queue if
+  throughput requires it.
+
+---
+
+## ADR-004: Analysis scope and reproducible engine configuration
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+Full analysis is expensive (≈ 500 games × 80 positions × 0.3 s ≈ 3+ hours). Results must
+be traceable and comparable across runs, and re-analysable with newer engines.
+
+### Decision
+- Automatically analyse the latest `AUTO_ANALYSE_LATEST_N` games (default **20**) after
+  a sync; all other games are analysed **on demand**.
+- Limit Stockfish by **node count** with **`Threads=1`**, not by wall-clock time.
+- Every analysis run records engine name, engine version, node limit, threads, hash
+  size, MultiPV and classifier version.
+
+### Alternatives
+- **Analyse everything in the background:** best coverage, but long queues and wasted
+  compute on games nobody opens.
+- **Time-limited search:** simpler to reason about latency, but results depend on
+  hardware and load, so they aren't reproducible.
+- **Multi-threaded search:** faster per position, but non-deterministic results.
+
+### Consequences
+- (+) Predictable cost; the dashboard has data right after the first sync.
+- (+) Results are reproducible and comparable; re-analysis with a new engine creates a
+  new run instead of overwriting the old one.
+- (−) Aggregate error statistics initially cover only analysed games; the UI must state coverage.
+- (−) Single-threaded analysis is slower per game; parallelism comes from multiple workers.
+
+---
+
+## ADR-005: Streamlit frontend, API-only communication
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+We need a working dashboard quickly, without coupling the UI to backend internals.
+
+### Decision
+Streamlit for V1. The frontend calls the FastAPI backend over HTTP and **never imports**
+`chess_analytics` or touches the database.
+
+### Alternatives
+- **React / Next.js:** better UX and multi-user product potential; roughly doubles V1 effort.
+- **Streamlit importing backend code directly:** faster, but recreates the coupling we want to avoid.
+
+### Consequences
+- (+) Fast iteration in Python.
+- (+) The API is the only contract, so the frontend can be replaced later.
+- (−) Limited control over layout, interactivity and auth flows; likely replaced by V4.
+
+---
+
+## ADR-006: Store all raw games; process only standard chess in V1
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+Chess.com archives include variants (chess960, bughouse, crazyhouse, …) and daily
+(correspondence) games alongside live games.
+
+### Decision
+Persist **every** game in the raw layer. Parse and analyse only games with
+`rules == "chess"` in V1. Keep time class (bullet / blitz / rapid / daily) as a dimension.
+
+### Alternatives
+- **Drop variants at ingestion:** smaller data, but loses source data and forces a re-fetch later.
+- **Process all variants:** more coverage, but variant rules complicate parsing,
+  engine analysis and statistics.
+
+### Consequences
+- (+) Supporting chess960 later means re-processing raw data, not re-fetching it.
+- (−) Raw storage holds some rows that V1 never uses.
+
+---
+
+## ADR-007: Separate `players` from future `users`; games stored once
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+V1 has no accounts, but V3/V4 bring multiple platforms and multiple users. One game
+involves two players, and both may be tracked.
+
+### Decision
+- A **player** is a chess identity on a platform: `(platform, platform_username)`.
+- A **user** (V4) is an application account that may later link to several players.
+- A **game** is a global record identified by `(platform, platform_game_id)`, linked to
+  its white and black players. It is stored once, no matter whose sync fetched it.
+
+### Alternatives
+- **Games owned by the requesting user:** simpler queries, but duplicates shared games
+  and mixes up "who asked" with "who played".
+
+### Consequences
+- (+) No duplicates; multi-platform and multi-user support need no schema rewrite.
+- (+) A user can later link their Chess.com and Lichess identities.
+- (−) Player-centric queries must filter on "white or black = player".
+
+---
+
+## ADR-008: Repositories for operational data; analytics SQL specific to the backend
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+We want storage independence, but a fully generic data access layer for analytics would
+hide powerful SQL features and leak anyway.
+
+### Decision
+- CRUD and idempotent upserts for players, games, moves, jobs and analysis runs go through
+  **repository classes** in `storage/`. SQLAlchemy 2.0 is used for table definitions and
+  sessions.
+- Aggregation queries live in `analytics/` and are knowingly **PostgreSQL SQL**.
+
+### Alternatives
+- **Repositories everywhere:** maximal abstraction, but an analytics layer that offers
+  only the lowest common denominator.
+- **Raw SQL everywhere:** maximal control, but business logic coupled to the database
+  and harder to test.
+
+### Consequences
+- (+) Business logic is testable and independent of the database for operational data.
+- (+) Analytics can use window functions, CTEs, etc. freely.
+- (−) Moving analytics to DuckDB or Delta means rewriting `analytics/queries`; the scope
+  of that is known and limited.
+
+---
+
+## ADR-009: `uv` for Python packaging and dependency management
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+We need reproducible environments across laptop, CI and Docker.
+
+### Decision
+`uv` with `pyproject.toml` as the single config file, a committed `uv.lock`, and a
+`src/` layout package built with `uv_build`. Dev tools are kept in a `dev` dependency group.
+
+### Alternatives
+- **pip + requirements.txt:** universal, but no proper lockfile with transitive pinning.
+- **Poetry:** mature, but slower and with its own config conventions.
+
+### Consequences
+- (+) Fast, deterministic installs; one tool manages Python versions, venvs and dependencies.
+- (−) A newer tool; contributors need uv installed (single binary).
