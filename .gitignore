@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets / local config (commit .env.example, never .env)
+.env
+.env.*
+!.env.example
+
+# Local data and engine binaries
+data/
+*.db
+*.duckdb
+stockfish*
+!src/**/stockfish*.py
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
