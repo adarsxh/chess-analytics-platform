@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Platform for ingesting, analysing and visualising chess games from online platforms."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic-settings>=2.16.2",
+    "structlog>=26.1.0",
+]
 
 [dependency-groups]
 dev = [

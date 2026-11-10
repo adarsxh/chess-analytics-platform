@@ -116,7 +116,8 @@ Table-level design: [DATA_MODEL.md](DATA_MODEL.md).
 
 - **Configuration:** environment variables loaded via `pydantic-settings`;
   `.env.example` documents every setting. No secrets in code.
-- **Logging:** structured (JSON) logs with job and player identifiers for correlation.
+- **Logging:** `structlog` (ADR-010), set up in `logging_setup.py`; JSON in containers,
+  console locally; job and player identifiers bound as context for correlation.
 - **Reliability:** HTTP retries with backoff (429 / 5xx); jobs record status, attempts
   and errors; ingestion failures and analysis failures are tracked separately.
 - **Idempotency:** natural keys plus upserts at every layer; re-running a job is safe.
