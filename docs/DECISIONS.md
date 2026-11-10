@@ -248,3 +248,28 @@ We need reproducible environments across laptop, CI and Docker.
 ### Consequences
 - (+) Fast, deterministic installs; one tool manages Python versions, venvs and dependencies.
 - (−) A newer tool; contributors need uv installed (single binary).
+
+---
+
+## ADR-010: structlog for structured logging
+
+- **Status:** Accepted · **Date:** 2026-11-11
+
+### Context
+The API and the worker need machine-parseable logs that can be correlated by job and
+player, plus readable output during local development.
+
+### Decision
+`structlog`, integrated with stdlib `logging` through `ProcessorFormatter`, so
+third-party library logs (uvicorn, httpx, SQLAlchemy) share the same format. JSON by
+default; console rendering opt-in via `CHESS_LOG_FORMAT=console`. Context such as
+`job_id` is bound through `structlog.contextvars`.
+
+### Alternatives
+- **stdlib logging + custom JSON formatter:** no dependency, but more boilerplate, and
+  context has to be passed manually via `extra={}` on every call.
+
+### Consequences
+- (+) Key-value events (`log.info("archive_fetched", games=118)`) are queryable in any log backend.
+- (+) Context bound once at job start appears on every later line.
+- (−) One more dependency; developers must call `configure_logging()` at each entrypoint.
