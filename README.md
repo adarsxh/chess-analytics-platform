@@ -30,13 +30,32 @@ talks to the backend only over HTTP.
 
 ## Development setup
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) and Python 3.13 (uv can install it).
+Prerequisites: [uv](https://docs.astral.sh/uv/), Python 3.13 (uv can install it), Docker.
 
 ```bash
-uv sync                 # create .venv and install the project + dev tools
-uv run pytest           # run tests
-uv run ruff check .     # lint
-uv run ruff format .    # format
+uv sync                          # create .venv and install the project + dev tools
+cp .env.example .env             # local config; adjust passwords if you like
+docker compose up -d db          # start Postgres 18 in Docker
+uv run python -m chess_analytics.api      # API at http://127.0.0.1:8000 (docs: /docs)
+```
+
+Check it: `curl localhost:8000/health` (liveness) and `curl localhost:8000/health/ready`
+(readiness, which also checks the database).
+
+To run the full stack in containers (the same image CI builds):
+
+```bash
+docker compose up --build        # db + api; Ctrl+C to stop
+docker compose down              # stop containers (add -v to also delete DB data)
+```
+
+## Running tests
+
+```bash
+uv run pytest                    # unit tests; integration tests are skipped
+CHESS_TEST_DATABASE_URL=postgresql+psycopg://chess:change-me@localhost:5432/chess_analytics \
+  uv run pytest -m integration   # integration tests against the compose Postgres
+uv run ruff check . && uv run ruff format --check .
 ```
 
 ## Project layout
@@ -44,5 +63,7 @@ uv run ruff format .    # format
 ```
 src/chess_analytics/   application package (one subpackage per component)
 tests/                 unit and integration tests
+compose.yaml           local stack: Postgres + API
+Dockerfile             multi-stage API image
 docs/                  architecture, decisions, data model
 ```
