@@ -375,6 +375,7 @@ target exists yet.
 - (+) `main` is always lint-clean, tested against real Postgres, and has a buildable image.
 - (+) The protection rules are reviewed in code like everything else.
 - (−) Every change, even a typo fix, needs a PR and a CI run of about 1–3 minutes.
-- (−) Actions are pinned to major-version tags, not commit SHAs. That is convenient, but
+- (−) Actions are pinned to major-version tags (setup-uv to an exact version, as it no
+  longer publishes major tags), not commit SHAs. That is convenient, but
   a compromised tag would affect us; consider SHA pinning plus Dependabot later.
 - Future: a deployment workflow (CD) is a separate, later decision once a target is chosen.
