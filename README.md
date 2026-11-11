@@ -1,10 +1,12 @@
 # Chess Analytics Platform
 
+[![CI](https://github.com/adarsxh/chess-analytics-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/adarsxh/chess-analytics-platform/actions/workflows/ci.yml)
+
 Analyse your online chess games: ingest game history from Chess.com, run Stockfish
 analysis, and explore results (win/loss/draw, rating progression, openings,
 blunders and mistakes) through an API and a dashboard.
 
-> **Status:** V1 in progress, Phase 1 (repository and environment setup).
+> **Status:** V1 in progress. Phase 1 (repository, environment and CI) is complete.
 
 ## Architecture at a glance
 
@@ -58,6 +60,20 @@ CHESS_TEST_DATABASE_URL=postgresql+psycopg://chess:change-me@localhost:5432/ches
 uv run ruff check . && uv run ruff format --check .
 ```
 
+## Contributing workflow
+
+`main` is protected: every change goes through a short-lived branch and a PR, and CI
+(`lint`, `test`, `docker`) must pass before squash-merging. See ADR-013.
+
+```bash
+git checkout -b feat/<topic>
+# ...commit...
+git push -u origin feat/<topic>
+gh pr create --fill
+gh pr checks --watch             # wait for CI
+gh pr merge --squash --delete-branch
+```
+
 ## Project layout
 
 ```
@@ -65,5 +81,7 @@ src/chess_analytics/   application package (one subpackage per component)
 tests/                 unit and integration tests
 compose.yaml           local stack: Postgres + API
 Dockerfile             multi-stage API image
+.github/workflows/     CI pipeline
+.github/rulesets/      branch protection for main (as code)
 docs/                  architecture, decisions, data model
 ```
