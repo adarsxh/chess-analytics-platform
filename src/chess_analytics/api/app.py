@@ -15,6 +15,7 @@ from chess_analytics import __version__
 from chess_analytics.api.routes import health
 from chess_analytics.config import Settings, get_settings
 from chess_analytics.logging_setup import configure_logging
+from chess_analytics.storage.db import create_db_engine
 
 log = structlog.get_logger(__name__)
 
@@ -22,11 +23,14 @@ log = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Runs once at startup (before `yield`) and once at shutdown (after).
-    # Later steps open/close the database engine here.
     settings: Settings = app.state.settings
+    app.state.engine = create_db_engine(settings)  # lazy: no connection opened yet
     log.info("api_started", env=settings.env, version=__version__)
-    yield
-    log.info("api_stopped")
+    try:
+        yield
+    finally:
+        app.state.engine.dispose()  # close pooled connections cleanly
+        log.info("api_stopped")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

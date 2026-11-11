@@ -9,7 +9,7 @@ Settings are added here only when the component that needs them is built.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -20,8 +20,10 @@ class Settings(BaseSettings):
         env_prefix="CHESS_",
         env_file=".env",
         env_file_encoding="utf-8",
-        # Unknown CHESS_* keys (e.g. a typo like CHESS_LOG_LEVL) fail loudly at startup.
-        extra="forbid",
+        # .env is shared with docker compose (POSTGRES_* keys), so unknown keys must be
+        # ignored. Trade-off: a typo like CHESS_LOG_LEVL is silently ignored too.
+        # Invalid *values* for known settings still fail at startup.
+        extra="ignore",
     )
 
     env: Literal["local", "test", "ci", "production"] = "local"
@@ -35,6 +37,11 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
     api_reload: bool = False  # auto-restart on code changes; local development only
+
+    # SQLAlchemy URL, e.g. postgresql+psycopg://user:password@localhost:5432/chess_analytics
+    # Required: there is no safe default for credentials. SecretStr keeps the password
+    # out of logs and reprs; call .get_secret_value() only where the URL is actually used.
+    database_url: SecretStr
 
     @field_validator("log_level", mode="before")
     @classmethod

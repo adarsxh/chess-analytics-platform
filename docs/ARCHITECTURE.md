@@ -121,6 +121,10 @@ Table-level design: [DATA_MODEL.md](DATA_MODEL.md).
 - **Reliability:** HTTP retries with backoff (429 / 5xx); jobs record status, attempts
   and errors; ingestion failures and analysis failures are tracked separately.
 - **Idempotency:** natural keys plus upserts at every layer; re-running a job is safe.
+- **Health:** `GET /health` (liveness, no dependency checks) and `GET /health/ready`
+  (readiness, checks Postgres, 503 when unavailable). See ADR-012.
+- **Database access:** synchronous SQLAlchemy 2.0 + psycopg 3, one engine per process
+  created in the app lifespan (ADR-011).
 
 ## 7. Explicitly out of scope for V1
 

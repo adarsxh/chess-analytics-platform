@@ -273,3 +273,68 @@ default; console rendering opt-in via `CHESS_LOG_FORMAT=console`. Context such a
 - (+) Key-value events (`log.info("archive_fetched", games=118)`) are queryable in any log backend.
 - (+) Context bound once at job start appears on every later line.
 - (−) One more dependency; developers must call `configure_logging()` at each entrypoint.
+
+---
+
+## ADR-011: Synchronous database access with SQLAlchemy 2.0 + psycopg 3
+
+- **Status:** Accepted · **Date:** 2026-11-12
+
+### Context
+Every repository, every route that touches the DB, and the worker depend on whether DB
+access is sync or async. The worker is dominated by Stockfish CPU time; the API's
+expected concurrency is modest.
+
+### Decision
+Synchronous SQLAlchemy 2.0 with the psycopg 3 driver (`postgresql+psycopg://`). Routes
+that touch the DB are plain `def`; FastAPI runs them in its threadpool. One engine
+(connection pool) per process, created in the app lifespan, with `pool_pre_ping` and a
+connect timeout.
+
+### Alternatives
+- **Async (asyncpg + AsyncSession):** higher I/O concurrency, but async spreads through
+  the whole codebase, lazy loading becomes an error, and testing and debugging are harder.
+  Engine analysis gains nothing from it.
+- **psycopg2:** mature but legacy; psycopg 3 is its maintained successor.
+
+### Consequences
+- (+) Simpler code, tests and stack traces.
+- (+) psycopg 3 also supports async, so a later move to async is possible without changing driver.
+- (−) Each in-flight DB request occupies a threadpool thread; fine at our scale, revisit
+  if the API ever needs thousands of concurrent DB-bound requests.
+
+---
+
+## ADR-012: Local environment with Docker Compose, PostgreSQL 18, hybrid dev loop
+
+- **Status:** Accepted · **Date:** 2026-11-12
+
+### Context
+We need a reproducible local Postgres and a container image that matches what CI and,
+later, production will run, without slowing down daily development.
+
+### Decision
+- `compose.yaml` defines `db` (`postgres:18`, Debian-based) and `api` (our Dockerfile).
+- **Hybrid loop:** day to day, run only `db` in Docker and the API natively with uv
+  (fast reload, debugger). Use `docker compose up --build` to verify the full container.
+- Multi-stage Dockerfile: a uv builder stage plus a slim runtime holding only the virtualenv,
+  running as a non-root user. JSON logs and `0.0.0.0` binding are set in the image.
+- Liveness (`/health`) never checks dependencies; readiness (`/health/ready`) checks the
+  database and returns 503 when it is unreachable.
+- `.env` is shared by the app (`CHESS_*`) and compose (`POSTGRES_*`), so app settings
+  ignore unknown keys.
+
+### Alternatives
+- **Everything in Docker for dev:** closest to production, but slower feedback and harder debugging.
+- **Locally installed Postgres:** no Docker, but version drift between machines and CI.
+- **PostgreSQL 17:** more conservative; 18 is stable (18.6) with longer support.
+- **Alpine Postgres image:** smaller, but musl/ICU collation differences from managed
+  Postgres can change text sort order.
+
+### Consequences
+- (+) Same Postgres major version locally, in CI and (target) in production.
+- (+) Readiness and liveness are separate, so orchestrators can hold back traffic
+  without restarting the API.
+- (−) The DB password appears twice in `.env` (in `POSTGRES_PASSWORD` and inside
+  `CHESS_DATABASE_URL`), and the two must be kept in sync by hand.
+- (−) Typos in `CHESS_*` keys in `.env` are silently ignored (trade-off of `extra="ignore"`).
