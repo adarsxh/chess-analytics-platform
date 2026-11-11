@@ -5,12 +5,15 @@ description = "Platform for ingesting, analysing and visualising chess games fro
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.162.4",
     "pydantic-settings>=2.16.2",
     "structlog>=26.1.0",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.16.0",
     "pytest>=9.2.0",
     "ruff>=0.17.4",
 ]
