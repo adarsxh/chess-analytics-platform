@@ -126,7 +126,17 @@ Table-level design: [DATA_MODEL.md](DATA_MODEL.md).
 - **Database access:** synchronous SQLAlchemy 2.0 + psycopg 3, one engine per process
   created in the app lifespan (ADR-011).
 
-## 7. Explicitly out of scope for V1
+## 7. Delivery pipeline
+
+| Tool | Role in this project |
+|---|---|
+| **GitHub Actions** | Checks the *software* on every change: lint, tests (with Postgres), image build (ADR-013) |
+| **Docker** | Packages the application and its dependencies into an image that runs the same everywhere |
+| **Airflow** (later, V6) | Orchestrates the *data pipeline* on a schedule: ingestion, re-analysis, backfills |
+
+CI does not deploy. Continuous delivery is added once a deployment target is chosen.
+
+## 8. Explicitly out of scope for V1
 
 Authentication and user accounts, multiple platforms, Airflow, Redis/Celery, cloud
 deployment, Parquet/Delta exports. The boundaries above are designed so each can be

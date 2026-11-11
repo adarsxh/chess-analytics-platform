@@ -1,0 +1,93 @@
+# Continuous Integration: validates every change before it can reach main.
+# It does NOT deploy anything (no deployment target decided yet).
+#
+# Three independent jobs run in parallel on fresh VMs. Their names (lint, test, docker)
+# are the required status checks in .github/rulesets/main.json; rename them in both places.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the workflow's GITHUB_TOKEN can only read the repository.
+permissions:
+  contents: read
+
+# A new push to the same PR/branch cancels the run that is now out of date.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.0" # keep in sync with the uv image in the Dockerfile
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag published since v8
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Install dependencies (fails if uv.lock is out of date)
+        run: uv sync --locked
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      # A throwaway Postgres for this job only, same major version as compose.yaml.
+      # The credentials are not secrets: the database exists for a few minutes on a
+      # disposable VM and holds no real data.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: chess
+          POSTGRES_PASSWORD: chess
+          POSTGRES_DB: chess_analytics_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chess -d chess_analytics_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      CHESS_TEST_DATABASE_URL: postgresql+psycopg://chess:chess@localhost:5432/chess_analytics_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag published since v8
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Unit + integration tests
+        run: uv run pytest -v
+
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build API image (not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true # make the image available to the next step
+          tags: chess-analytics-api:ci
+          # Reuse layers between CI runs via the GitHub Actions cache.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the image
+        run: docker run --rm chess-analytics-api:ci python -c "import chess_analytics; print(chess_analytics.__version__)"

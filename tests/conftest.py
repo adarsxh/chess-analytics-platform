@@ -33,5 +33,9 @@ def make_settings() -> Callable[..., Settings]:
 def test_database_url() -> str:
     url = os.environ.get("CHESS_TEST_DATABASE_URL")
     if not url:
+        # Locally, skipping is convenient. In CI (GitHub sets CI=true), a skip would turn
+        # a misconfigured pipeline into a silently green build, so fail instead.
+        if os.environ.get("CI"):
+            pytest.fail("CHESS_TEST_DATABASE_URL must be set in CI")
         pytest.skip("CHESS_TEST_DATABASE_URL not set; start Postgres to run integration tests")
     return url

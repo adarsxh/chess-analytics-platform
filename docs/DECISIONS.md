@@ -338,3 +338,44 @@ later, production will run, without slowing down daily development.
 - (−) The DB password appears twice in `.env` (in `POSTGRES_PASSWORD` and inside
   `CHESS_DATABASE_URL`), and the two must be kept in sync by hand.
 - (−) Typos in `CHESS_*` keys in `.env` are silently ignored (trade-off of `extra="ignore"`).
+
+---
+
+## ADR-013: GitHub Actions CI with three parallel jobs; protected `main`
+
+- **Status:** Accepted · **Date:** 2026-11-12
+
+### Context
+Nothing prevented broken code from reaching `main`. We need automated validation on
+every change, and a rule that `main` only accepts validated changes. No deployment
+target exists yet.
+
+### Decision
+- `.github/workflows/ci.yml` runs on every PR and every push to `main`, as three
+  parallel jobs:
+  - `lint`: `uv sync --locked`, ruff check, ruff format check
+  - `test`: unit and integration tests against a `postgres:18` service container
+  - `docker`: build the API image (not pushed) and run a smoke test
+- Least-privilege token (`contents: read`), cancel out-of-date runs, job timeouts.
+- In CI (`CI=true`), a missing test database URL **fails** instead of skipping.
+- `main` is protected by a repository ruleset, versioned in `.github/rulesets/main.json`:
+  - changes only through PRs, with 0 required approvals (solo developer)
+  - squash merge only
+  - `lint`, `test` and `docker` must pass, reported by the GitHub Actions app
+  - the branch must be up to date with `main`
+  - no force-push or deletion
+  - no bypass, including for admins
+
+### Alternatives
+- **Single sequential job:** simpler, but slower, and an early failure hides later ones.
+- **Admin bypass allowed:** handy for emergencies, but tends to turn into a habit.
+- **No enforcement:** CI results would only be advisory.
+
+### Consequences
+- (+) `main` is always lint-clean, tested against real Postgres, and has a buildable image.
+- (+) The protection rules are reviewed in code like everything else.
+- (−) Every change, even a typo fix, needs a PR and a CI run of about 1–3 minutes.
+- (−) Actions are pinned to major-version tags (setup-uv to an exact version, as it no
+  longer publishes major tags), not commit SHAs. That is convenient, but
+  a compromised tag would affect us; consider SHA pinning plus Dependabot later.
+- Future: a deployment workflow (CD) is a separate, later decision once a target is chosen.
