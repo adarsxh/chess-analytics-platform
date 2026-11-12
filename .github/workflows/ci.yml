@@ -72,6 +72,15 @@ jobs:
         run: uv sync --locked
       - name: Unit + integration tests
         run: uv run pytest -v
+      # The same commands a deployment would run, against the service database.
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+        env:
+          CHESS_DATABASE_URL: ${{ env.CHESS_TEST_DATABASE_URL }}
+      - name: Check models match migrations
+        run: uv run alembic check
+        env:
+          CHESS_DATABASE_URL: ${{ env.CHESS_TEST_DATABASE_URL }}
 
   docker:
     runs-on: ubuntu-24.04

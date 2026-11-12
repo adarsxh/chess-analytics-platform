@@ -546,3 +546,39 @@ same work twice, and workers may crash mid-job.
 ### Consequences
 - (+) Layers visible in SQL; per-layer permissions possible; schema changes are ordinary migrations.
 - (−) Slightly longer names; Alembic must be configured for multiple schemas.
+
+---
+
+## ADR-020: Alembic migrations, run as a separate explicit step
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Context
+The schema must evolve in a reviewed, repeatable way across laptop, CI and future
+deployments. Several processes (API, worker, possibly replicas) share one database.
+
+### Decision
+- Alembic manages the schema. Migration files are in `migrations/versions/`, named
+  `YYYY_MM_DD-<rev>_<slug>.py` with sequential revision IDs (`0001`, `0002`, …). Each new
+  revision file is formatted and linted by ruff automatically.
+- The database URL comes from application settings (`CHESS_DATABASE_URL`), not `alembic.ini`.
+- Migrations run **only as an explicit step**, never inside the API or worker:
+  - locally: `uv run alembic upgrade head`
+  - compose: a one-off `migrate` service; `api` starts only after it exits successfully
+  - CI: `alembic upgrade head` + `alembic check` against the service Postgres
+  - future deployments: a release step before new code starts
+- The whole upgrade runs in one transaction (Postgres transactional DDL).
+- Tests build schemas in throwaway databases and verify upgrade → downgrade → upgrade, a single
+  head, and that models match migrations.
+
+### Alternatives
+- **Migrate at API startup:** convenient, but concurrent processes race; the app user needs DDL
+  privileges; a broken migration crash-loops the app.
+- **Hand-written SQL scripts / `metadata.create_all()`:** no version tracking or downgrades;
+  `create_all` cannot change existing tables.
+
+### Consequences
+- (+) Schema changes are reviewed in PRs and applied identically everywhere.
+- (+) App processes can later run with a database role that has no DDL rights.
+- (+) A failing migration rolls back fully and blocks the app from starting with the wrong schema.
+- (−) One more command in the local workflow (`alembic upgrade head` after pulling).

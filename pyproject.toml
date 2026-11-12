@@ -5,6 +5,7 @@ description = "Platform for ingesting, analysing and visualising chess games fro
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "fastapi>=0.162.4",
     "psycopg[binary]>=3.3.8",
     "pydantic-settings>=2.16.2",
