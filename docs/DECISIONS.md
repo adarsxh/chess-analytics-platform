@@ -379,3 +379,170 @@ target exists yet.
   longer publishes major tags), not commit SHAs. That is convenient, but
   a compromised tag would affect us; consider SHA pinning plus Dependabot later.
 - Future: a deployment workflow (CD) is a separate, later decision once a target is chosen.
+
+---
+
+## ADR-014: Identity, keys and deduplication
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Context
+Games appear in both players' archives and are re-fetched on every sync. Usernames can change.
+Profiling real data showed games carry a game `uuid` and per-player `uuid`s, while the profile
+endpoint exposes only a numeric `player_id`.
+
+### Decision
+- **Game identity:** `(platform, platform_game_id)` where the ID is the game's `uuid`. The URL is
+  kept as an attribute.
+- **Player identity:** `(platform, platform_uuid)`. The username is a mutable attribute, looked up
+  case-insensitively. `platform_uuid` is nullable until the player's first game is seen.
+  Opponents are stored as players.
+- **Keys:** surrogate `bigint` identity PKs everywhere; natural keys enforced as `UNIQUE`.
+
+### Alternatives
+- Numeric game ID parsed from the URL: identity would depend on a URL format.
+- Username as player identity: simple, but a rename splits one person into two players.
+- Natural composite PKs: no extra column, but every child table repeats multi-column FKs.
+
+### Consequences
+- (+) No duplicate games; renames don't fragment history; compact FKs on large tables.
+- (−) Linking a username lookup to a uuid needs a little logic, because the uuid is learned from games.
+
+---
+
+## ADR-015: Raw layer: versioned per-game payloads and ETag-based incremental fetch
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Context
+Raw data must never be lost. Game payloads can change after first fetch (e.g. `accuracies`
+appear once a game is reviewed). Real-data tests showed `If-None-Match` returns 304 while
+`Last-Modified` is unreliable.
+
+### Decision
+- One `raw.raw_games` row per **distinct version** of a game object (JSONB), with
+  `UNIQUE (platform, platform_game_id, content_hash)`. The hash is SHA-256 over canonical JSON.
+  Re-seeing a version updates only `last_seen_at`; the current version = highest `last_seen_at`.
+- `raw.archive_fetches` logs every archive request (status, ETag, counts). No payloads are stored there.
+- Every sync revalidates **all** archives with ETags; a `full_refresh` mode ignores them.
+
+### Alternatives
+- Whole-archive snapshots: byte-exact, but a second raw table and an extraction step for no gain.
+- Upsert-in-place or insert-once: lose history or miss late changes.
+- Fetching only recent months: fewer requests, but misses late changes to old games.
+
+### Consequences
+- (+) Complete, append-only history with cheap deduplication; precise lineage per version.
+- (+) Unchanged months cost one 304 request.
+- (−) `last_seen_at` is the one mutable column on raw rows (metadata, never the payload).
+
+---
+
+## ADR-016: Processed (`core`) layer shape
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Context
+Analytics are mostly player-centric ("my results, my ratings"). The engine needs positions per
+move. Opening names differ across platforms.
+
+### Decision
+- `core` is **current state, rebuildable from `raw`**. It is not versioned. Each game records
+  `raw_game_id` and `parser_version` for lineage. Reprocessing replaces a game's rows in one transaction.
+- `core.games` holds game-level facts. `core.game_players` holds **two rows per game** (color,
+  rating_after, result_code, normalised outcome, source accuracy). This resolves the
+  "white OR black" query cost noted in ADR-007.
+- `core.game_moves` has one row per ply, including `fen_after`, `clock_ms` and `time_spent_ms`.
+- Openings: platform-provided `source_eco` / `source_opening_name` in V1. Our own cross-platform
+  classification will be a later derived step.
+
+### Alternatives
+- Wide `games` with white_/black_ columns: every player query needs `OR` and `CASE`.
+- Moves without FEN (replay on demand) or as an array column: less storage, harder analysis.
+- Versioning `core`: triples complexity for data that can always be rebuilt.
+- Own opening classification now: consistent across platforms, but work that is needed only in V3.
+
+### Consequences
+- (+) Simple, indexable player queries; per-move SQL analytics; direct engine input.
+- (−) Showing one game needs a join; about 10 MB of FEN for ~156k moves.
+- (−) Cross-platform opening statistics need future work.
+
+---
+
+## ADR-017: Analysis layer versioning
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Context
+Engine results are expensive and depend on engine version and settings. Classification rules
+will change far more often than engine runs.
+
+### Decision
+- `analysis_configs` (deduplicated by `config_hash`) → `game_analyses` with
+  `UNIQUE (game_id, analysis_config_id)` → `position_evaluations` (one per position, White's
+  point of view, `score_cp` XOR signed `mate_in`, `pv_rank` column).
+- MultiPV = 1 in V1. MultiPV ≥ 2 ("only move" detection) is planned for V2 as a new config, with no migration needed.
+- `move_classifications` keyed by `(game_analysis_id, ply, classifier_version)`.
+- `game_analyses.moves_hash` vs `games.moves_hash` detects stale analyses.
+- Cross-layer FKs (`game_analyses` → `games`) are `RESTRICT`.
+
+### Alternatives
+- Batch-level analysis runs: duplicates the job queue's role.
+- MultiPV 2 now: about 1.5–2× engine cost for a feature outside V1.
+- Classification stored on evaluations, or computed at query time: rule changes would overwrite
+  history, or require Python per request.
+
+### Consequences
+- (+) Re-analysis adds data rather than replacing it; reclassification without the engine; reproducibility.
+- (−) More tables and joins than a single "analysis" table.
+
+---
+
+## ADR-018: Jobs separate from ingestion runs; deduplication and leases
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Context
+ADR-003 chose a Postgres queue and kept open the option to replace it. Users may trigger the
+same work twice, and workers may crash mid-job.
+
+### Decision
+- `ops.jobs` is generic, replaceable infrastructure. `raw.ingestion_runs` and
+  `analysis.game_analyses` are the domain records, and lineage points to them, never to jobs.
+- `dedup_key` with a partial `UNIQUE` where status is `queued` or `running`. Enqueueing a
+  duplicate returns the active job.
+- Leases: `locked_until`, extended by a heartbeat; expired leases are reclaimable. Retries use
+  backoff via `run_after`, up to `max_attempts`. `priority` puts on-demand work first.
+- Failures are recorded per stage: run error, `processing_failures`, analysis error.
+
+### Alternatives
+- Jobs as the run record: one table, but lineage would be tied to the queue implementation.
+- Check-then-insert deduplication: race condition under concurrency.
+- Holding row locks for the whole job: long transactions block VACUUM and hide progress.
+
+### Consequences
+- (+) Queue can be swapped; duplicates prevented by the database; crash recovery without long transactions.
+- (−) Some duplicated status between jobs and domain records; workers must send heartbeats.
+
+---
+
+## ADR-019: Database conventions
+
+- **Status:** Accepted · **Date:** 2026-11-13
+
+### Decision
+- Postgres schemas per layer: `raw`, `core`, `analysis`, `ops`.
+- Fixed value sets as `text` + `CHECK`, not native `ENUM` or lookup tables.
+- `bigint` identity PKs; `timestamptz` in UTC; snake_case plural names; constraint names from a
+  SQLAlchemy naming convention; `text` over `varchar(n)`; `jsonb`.
+- FKs `RESTRICT` by default, `CASCADE` only parent → own children within a layer; no soft deletes in V1.
+
+### Alternatives
+- Single `public` schema with prefixes: simpler, but layers would be a naming habit only and
+  permissions would be per table.
+- Native ENUMs: values cannot be removed or reordered without recreating the type.
+- Lookup tables: flexible, but a join for every label.
+
+### Consequences
+- (+) Layers visible in SQL; per-layer permissions possible; schema changes are ordinary migrations.
+- (−) Slightly longer names; Alembic must be configured for multiple schemas.

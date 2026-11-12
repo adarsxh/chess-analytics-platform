@@ -109,7 +109,8 @@ or re-analyse with a new engine version without re-fetching or re-parsing.
 | Processed | Normalised games, players, moves, openings, results, ratings | Reproducible from raw; tagged with `parser_version` |
 | Analysis | Engine evaluations and move classifications | Kept separate from processed data; tagged with engine and classifier versions |
 
-These are logical layers inside one PostgreSQL database, not separate systems.
+These layers are separate Postgres **schemas** (`raw`, `core`, `analysis`, plus `ops` for
+the job queue) in one database, not separate systems (ADR-019).
 Table-level design: [DATA_MODEL.md](DATA_MODEL.md).
 
 ## 6. Cross-cutting concerns
