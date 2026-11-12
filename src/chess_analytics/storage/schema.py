@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, Identity, MetaData, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Postgres schemas, one per logical data layer (ADR-019).
@@ -42,6 +42,7 @@ class Base(DeclarativeBase):
         str: Text,
         datetime: DateTime(timezone=True),
         dict[str, Any]: JSONB,
+        list[str]: ARRAY(Text),
     }
 
 

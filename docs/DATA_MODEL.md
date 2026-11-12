@@ -223,6 +223,7 @@ PK `(raw_game_id, parser_version)`.
 | created_at, updated_at | timestamptz | |
 
 `UNIQUE (game_id, analysis_config_id)`: the same config re-runs in place; a new config adds a row.
+Index `(analysis_config_id)` for "all games analysed with config X".
 
 **`analysis.position_evaluations`**: engine output per position.
 
@@ -272,7 +273,8 @@ PK `(game_analysis_id, ply, classifier_version)`.
 | created_at, started_at, finished_at, updated_at | timestamptz | |
 
 Partial `UNIQUE (dedup_key) WHERE status IN ('queued','running')`; claim index
-`(priority, run_after) WHERE status = 'queued'`.
+`(priority, run_after) WHERE status = 'queued'`; lease-recovery index `(locked_until) WHERE status = 'running'`;
+`CHECK (status <> 'running' OR locked_until IS NOT NULL)`: a running job always holds a lease.
 
 ## 5. Guarantees and what enforces them
 
