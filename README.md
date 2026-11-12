@@ -100,6 +100,7 @@ compose.yaml           local stack: Postgres + API
 Dockerfile             multi-stage API image
 alembic.ini            Alembic config (DB URL comes from settings)
 migrations/            schema migrations (versions/ = history)
+src/…/storage/models/  table definitions, one module per Postgres schema
 .github/workflows/     CI pipeline
 .github/rulesets/      branch protection for main (as code)
 docs/                  architecture, decisions, data model

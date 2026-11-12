@@ -7,7 +7,8 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 
-from chess_analytics.storage.schema import SCHEMAS, metadata
+from chess_analytics.storage.models import metadata
+from chess_analytics.storage.schema import SCHEMAS
 
 pytestmark = pytest.mark.integration
 
