@@ -29,7 +29,7 @@ def make_settings() -> Callable[..., Settings]:
     return _make
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def test_database_url() -> str:
     url = os.environ.get("CHESS_TEST_DATABASE_URL")
     if not url:

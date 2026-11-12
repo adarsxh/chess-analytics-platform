@@ -278,6 +278,10 @@ Partial `UNIQUE (dedup_key) WHERE status IN ('queued','running')`; claim index
 
 ## 5. Guarantees and what enforces them
 
+Every guarantee below is proven by an integration test in
+`tests/integration/test_data_model_guarantees.py`, which runs against the real migrations on every
+PR. Each test asserts the **specific named constraint** that must fire.
+
 | Requirement | Enforced by |
 |---|---|
 | A game is never duplicated, even when both players are tracked | `UNIQUE (platform, platform_game_id)` on `core.games` |
