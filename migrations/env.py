@@ -10,7 +10,8 @@ from sqlalchemy import create_engine
 
 from chess_analytics.config import get_settings
 from chess_analytics.logging_setup import configure_logging
-from chess_analytics.storage.schema import SCHEMAS, metadata
+from chess_analytics.storage.models import metadata
+from chess_analytics.storage.schema import SCHEMAS
 
 config = context.config
 
