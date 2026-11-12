@@ -35,8 +35,13 @@ FROM ${PYTHON_IMAGE} AS runtime
 
 # Run as an unprivileged user, not root.
 RUN groupadd --system app && useradd --system --gid app --no-create-home app
+WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
+# Migrations ship with the image so the same image can run `alembic upgrade head`
+# as a separate step before the app starts (ADR-020).
+COPY --chown=app:app alembic.ini ./alembic.ini
+COPY --chown=app:app migrations ./migrations
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
@@ -44,7 +49,6 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     CHESS_LOG_FORMAT=json
 
 USER app
-WORKDIR /app
 EXPOSE 8000
 
 CMD ["python", "-m", "chess_analytics.api"]

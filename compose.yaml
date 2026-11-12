@@ -1,6 +1,7 @@
 # Local development stack.
-#   docker compose up -d db     → only Postgres (daily dev: run the API natively with uv)
-#   docker compose up --build   → full stack (verify the container image)
+#   docker compose up -d db     → only Postgres (daily dev: run the API natively with uv;
+#                                 apply migrations with `uv run alembic upgrade head`)
+#   docker compose up --build   → full stack: db → migrate (one-off) → api
 #
 # Values like ${POSTGRES_PASSWORD} are read from the .env file next to this one.
 
@@ -25,6 +26,17 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    # One-off: applies pending migrations, then exits. api only starts if it succeeded.
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      CHESS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build: .
     environment:
@@ -35,8 +47,8 @@ services:
     ports:
       - "127.0.0.1:${CHESS_API_PORT:-8000}:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
       interval: 10s

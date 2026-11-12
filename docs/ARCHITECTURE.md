@@ -126,6 +126,9 @@ Table-level design: [DATA_MODEL.md](DATA_MODEL.md).
   (readiness, checks Postgres, 503 when unavailable). See ADR-012.
 - **Database access:** synchronous SQLAlchemy 2.0 + psycopg 3, one engine per process
   created in the app lifespan (ADR-011).
+- **Schema migrations:** Alembic, run as a separate step before app processes start
+  (`migrate` service in compose, a CI step, a release step later). The API and worker never
+  change the schema (ADR-020).
 
 ## 7. Delivery pipeline
 
