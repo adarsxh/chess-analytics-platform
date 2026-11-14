@@ -24,7 +24,7 @@ talks to the backend only over HTTP.
 | Version | Focus |
 |---|---|
 | V1 | Chess.com ingestion, Stockfish analysis, basic dashboard |
-| V2 | Better analytics: openings, weaknesses, time controls, accuracy trends |
+| V2 | Better analytics: openings, weaknesses, time controls, accuracy trends, results by opponent country |
 | V3 | Multiple platforms through additional ingestion adapters |
 | V4 | User accounts, auth, user-specific analytics, background processing |
 | V5 | Cloud deployment, managed DB, scalable workers, monitoring |
