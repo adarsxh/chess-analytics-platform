@@ -1,7 +1,7 @@
 # Local development stack.
 #   docker compose up -d db     → only Postgres (daily dev: run the API natively with uv;
 #                                 apply migrations with `uv run alembic upgrade head`)
-#   docker compose up --build   → full stack: db → migrate (one-off) → api
+#   docker compose up --build   → full stack: db → migrate (one-off) → api + worker
 #
 # Values like ${POSTGRES_PASSWORD} are read from the .env file next to this one.
 
@@ -55,6 +55,23 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+
+  worker:
+    # Runs queued jobs (syncs now, engine analysis in Phase 6). Scale with
+    # `docker compose up --scale worker=3`: SKIP LOCKED keeps workers from colliding.
+    build: .
+    command: ["python", "-m", "chess_analytics.worker"]
+    environment:
+      CHESS_ENV: local
+      CHESS_LOG_LEVEL: ${CHESS_LOG_LEVEL:-INFO}
+      CHESS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # `docker stop` sends SIGTERM, then SIGKILL after this grace period. A sync takes
+    # ~25 s, so give the current job time to finish instead of being killed mid-way.
+    stop_grace_period: 60s
+    restart: unless-stopped
 
 volumes:
   pgdata:

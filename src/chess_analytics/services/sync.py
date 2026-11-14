@@ -23,10 +23,30 @@ from chess_analytics.ingestion.base import ArchiveFetchResult, GameSource, Sourc
 from chess_analytics.services.process import process_pending
 from chess_analytics.storage.models.core import Player
 from chess_analytics.storage.models.raw import IngestionRun
+from chess_analytics.storage.repositories.jobs import JobRepository
 from chess_analytics.storage.repositories.players import PlayerRepository
 from chess_analytics.storage.repositories.raw import RawRepository
 
 log = structlog.get_logger(__name__)
+
+SYNC_JOB_TYPE = "sync_player"
+
+
+def request_sync(
+    session_factory: sessionmaker[Session], *, platform: str, username: str
+) -> tuple[int, bool]:
+    """Queue a sync for the worker. Returns (job_id, created).
+
+    Deduplicated per platform and (case-insensitive) username: requesting a sync that is
+    already queued or running returns that job instead of queueing a second one.
+    """
+    with session_factory.begin() as session:
+        job, created = JobRepository(session).enqueue(
+            SYNC_JOB_TYPE,
+            {"platform": platform, "username": username},
+            dedup_key=f"sync:{platform}:{username.lower()}",
+        )
+        return job.id, created
 
 
 @dataclass
