@@ -40,6 +40,33 @@ class PlayerRepository:
         self._session.flush()
         return player
 
+    def resolve_from_game(self, *, platform: str, platform_uuid: str, username: str) -> Player:
+        """Find or create the player behind one side of a game.
+
+        1. By uuid: the stable identity. A changed username means a rename → updated.
+        2. A placeholder (uuid unknown) with this username: this is the moment its uuid
+           becomes known, so it is filled in (e.g. the synced player's own profile row).
+        3. Otherwise a new player (typically an opponent).
+        """
+        player = self._session.scalar(
+            select(Player).where(Player.platform == platform, Player.platform_uuid == platform_uuid)
+        )
+        if player is None:
+            player = self._session.scalar(
+                select(Player).where(
+                    Player.platform == platform,
+                    Player.platform_uuid.is_(None),
+                    func.lower(Player.username) == username.lower(),
+                )
+            )
+        if player is None:
+            player = self._insert_known(platform, platform_uuid, username)
+
+        player.platform_uuid = platform_uuid
+        player.username = username
+        self._session.flush()
+        return player
+
     def track(self, player: Player) -> TrackedPlayer:
         """Mark a player as synced by us. Idempotent."""
         tracked = self._session.get(TrackedPlayer, player.id)
@@ -74,6 +101,23 @@ class PlayerRepository:
             .order_by(Player.updated_at.desc(), Player.id.desc())
             .limit(1)
         )
+
+    def _insert_known(self, platform: str, platform_uuid: str, username: str) -> Player:
+        player = Player(platform=platform, platform_uuid=platform_uuid, username=username)
+        try:
+            # SAVEPOINT: a concurrent process may have inserted this uuid a moment ago.
+            with self._session.begin_nested():
+                self._session.add(player)
+        except IntegrityError:
+            existing = self._session.scalar(
+                select(Player).where(
+                    Player.platform == platform, Player.platform_uuid == platform_uuid
+                )
+            )
+            if existing is None:
+                raise
+            return existing
+        return player
 
     def _insert_placeholder(
         self, platform: str, username: str, platform_player_id: int | None
