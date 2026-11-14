@@ -330,6 +330,13 @@ PR. Each test asserts the **specific named constraint** that must fire.
 ## 8. Planned evolution (not in V1)
 
 - MultiPV ≥ 2 for "only move" detection: a new config only; `pv_rank` already exists.
+- **Player profiles and country (V2)**, for country-wise analysis. Country exists only on
+  the profile endpoint (`"country": ".../pub/country/IN"`), never in game data, so it needs
+  one profile request per player. Planned shape: a low-priority, deduplicated
+  `enrich_player` job; whole profile payloads kept in a new `raw.player_profiles` table
+  (versioned by content hash, like `raw_games`); `core.players.country_code` parsed from
+  the URL. Cost: ~2,400 requests once for the current history, then only new opponents.
+  Caveats: country is self-declared and mutable; closed accounts return 404 (unknown).
 - Own opening classification (cross-platform): a derived, versioned addition.
 - `users` and a user ↔ tracked player relationship (V4).
 - Parquet/DuckDB/Delta exports of `core` and `analysis` (V6).
