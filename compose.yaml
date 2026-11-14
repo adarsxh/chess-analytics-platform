@@ -29,6 +29,7 @@ services:
   migrate:
     # One-off: applies pending migrations, then exits. api only starts if it succeeded.
     build: .
+    image: ${CHESS_IMAGE:-chess-analytics:local}  # CI sets CHESS_IMAGE to its built image
     command: ["alembic", "upgrade", "head"]
     environment:
       CHESS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
@@ -39,6 +40,7 @@ services:
 
   api:
     build: .
+    image: ${CHESS_IMAGE:-chess-analytics:local}  # CI sets CHESS_IMAGE to its built image
     environment:
       CHESS_ENV: local
       CHESS_LOG_LEVEL: ${CHESS_LOG_LEVEL:-INFO}
@@ -60,6 +62,7 @@ services:
     # Runs queued jobs (syncs now, engine analysis in Phase 6). Scale with
     # `docker compose up --scale worker=3`: SKIP LOCKED keeps workers from colliding.
     build: .
+    image: ${CHESS_IMAGE:-chess-analytics:local}  # CI sets CHESS_IMAGE to its built image
     command: ["python", "-m", "chess_analytics.worker"]
     environment:
       CHESS_ENV: local

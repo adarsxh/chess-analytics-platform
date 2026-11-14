@@ -582,3 +582,96 @@ deployments. Several processes (API, worker, possibly replicas) share one databa
 - (+) App processes can later run with a database role that has no DDL rights.
 - (+) A failing migration rolls back fully and blocks the app from starting with the wrong schema.
 - (−) One more command in the local workflow (`alembic upgrade head` after pulling).
+
+---
+
+## ADR-021: HTTP API conventions (`/api/v1`)
+
+- **Status:** Accepted · **Date:** 2026-11-15
+
+### Context
+Phase 5 adds the first business endpoints. The dashboard (Phase 7) and possibly other
+clients will depend on them, so URL shape, versioning, pagination and error behaviour
+must be decided before anything relies on them.
+
+### Decision
+- Business endpoints live under **`/api/v1`**. `/health` and `/health/ready` stay
+  unversioned because infrastructure checks them, not clients.
+- **Long-running work is asynchronous:** `POST /api/v1/players/{username}/sync` returns
+  `202 Accepted` with the job and a `Location: /api/v1/jobs/{id}` header; clients poll
+  `GET /api/v1/jobs/{id}`. A duplicate request returns the active job (`created: false`).
+- **Pagination:** `limit` (1–100, default 50) and `offset`, plus `total` in the response.
+- **The platform is a query parameter**, `?platform=chesscom` by default, so a second
+  platform can be added without changing any existing URL.
+- **Response models** (`api/schemas.py`) are separate from database models: tables can
+  change without breaking clients, and internals (lineage ids, worker ids, leases) are
+  not exposed. Read SQL lives in `storage/repositories/queries.py`, not in routes.
+- **Errors:** invalid input → `422` before any database access (e.g. username pattern,
+  `limit` range, unknown `time_class`); unknown player, game or job → `404` with a hint.
+- No authentication in V1 (accounts arrive in V4); the API listens on localhost only.
+
+### Alternatives
+- **Unversioned URLs:** shorter, but an incompatible change breaks every client at once.
+- **Cursor (keyset) pagination:** scales to millions of rows and is stable while new
+  games arrive, but is more complex and cannot jump to page N. Offset is fine for
+  thousands of games per player and can be replaced in a `v2` of the endpoint.
+- **Platform in the path** (`/players/{platform}/{username}`): explicit, but longer URLs
+  for a single-platform V1.
+- **Synchronous sync endpoint:** simpler for clients, but holds an HTTP request open for
+  10–25 s (minutes for engine analysis) and fails with the connection.
+
+### Consequences
+- (+) Clients get immediate responses; work survives client disconnects.
+- (+) The contract can evolve (`/api/v2`) without breaking existing clients.
+- (−) Clients must poll job status (push notifications could be added later).
+- (−) Deep offset pages get slower on very large tables (not a V1 concern).
+
+---
+
+## ADR-022: Worker runtime and job execution
+
+- **Status:** Accepted · **Date:** 2026-11-15
+
+### Context
+ADR-003 chose a Postgres-backed queue with a separate worker process; ADR-018 designed
+the `ops.jobs` table. Phase 5 implements how jobs are claimed, kept alive, retried and
+stopped, which determines reliability when workers crash or are restarted.
+
+### Decision
+- **Claiming:** `UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED LIMIT 1)`, ordered
+  by priority, then `run_after`. Concurrent workers never take the same job or wait for
+  each other.
+- **Polling:** when idle the worker waits ~2 s between checks; when busy it claims the
+  next job immediately. `LISTEN/NOTIFY` can be added later for lower latency.
+- **One job at a time per worker process**; scale by running more workers
+  (`docker compose up --scale worker=N`).
+- **Leases:** a claimed job holds `locked_until`; a background thread renews it every
+  lease / 3 (lease 60 s). Workers periodically requeue jobs whose lease expired (their
+  worker crashed). Heartbeat, complete and fail only apply while the worker still holds
+  the lease, so a worker that lost its job cannot overwrite the new owner's result.
+- **Failure classes:** `PermanentJobError` (unknown player, malformed payload, unknown job
+  type) → `failed` immediately. Anything else (Chess.com outage, unexpected errors) is
+  retried with backoff 30 s → 2 min → 8 min, up to `max_attempts` (3).
+- **All times come from the database clock** (`now()`), never from worker machines.
+- **Graceful shutdown:** the first SIGINT/SIGTERM lets the current job finish, a second
+  one exits at once (the job is recovered via its lease). Compose gives the worker a
+  60 s stop grace period.
+- **Triggers:** on-demand only in V1 (API, CLI). Scheduled syncing is deferred (V2).
+- **CI end-to-end test:** the full compose stack runs against a stdlib Chess.com stub
+  (`tests/e2e/`); the test drives it over HTTP. CI never calls the real Chess.com.
+
+### Alternatives
+- **Celery/RQ with Redis:** mature, but adds a broker to run and monitor; job state would
+  live outside the database we already back up and query.
+- **Threads or async concurrency inside one worker:** more throughput per process, but
+  harder to reason about; engine analysis is CPU-bound and better scaled by processes.
+- **Fixed retries for every error:** wastes attempts on errors that can never succeed.
+
+### Consequences
+- (+) Crashed workers lose no work; duplicate execution is prevented in SQL.
+- (+) Scaling out is a deployment change (more workers), not a code change.
+- (+) Job status is queryable with plain SQL and exposed through the API.
+- (−) Up to ~2 s latency before an idle worker starts a job.
+- (−) A job longer than the lease must keep heartbeating; a stalled heartbeat thread
+  would let the job be recovered and run twice (handlers are idempotent, so this is safe).
+

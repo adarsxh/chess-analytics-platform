@@ -83,22 +83,30 @@ only in that platform's adapter. Adding a new platform means adding
 
 ## 4. End-to-end data flow (V1)
 
-1. Frontend calls `POST /players/{platform}/{username}/sync` with a month range.
-2. API validates the input and confirms the player exists on the platform, upserts
-   the player, enqueues an **ingestion job**, and returns a `job_id` immediately.
-3. Worker claims the job, lists the monthly archives, and fetches only months that
-   are new or changed (conditional requests plus an archive fetch log).
+1. A client (the dashboard, `curl`) calls `POST /api/v1/players/{username}/sync`
+   (`?platform=chesscom` by default; ADR-021).
+2. API validates the username format, enqueues a deduplicated `sync_player` job in
+   `ops.jobs` and returns `202` with the job immediately. A sync already queued or running
+   for that player is returned instead of a duplicate.
+3. Worker claims the job (`SKIP LOCKED`, lease plus heartbeats; ADR-022), looks up the
+   player's profile (unknown player → job fails permanently, no retries), lists the
+   monthly archives, and fetches only months that are new or changed (ETag conditional
+   requests plus an archive fetch log).
 4. **Raw layer:** each game is stored exactly as received, keyed by
    `(platform, platform_game_id)`. Re-fetching an unchanged game is a no-op.
-5. **Processed layer:** new raw games are normalised into games and moves, with a
-   reference to the raw record and the `parser_version`.
+5. **Processed layer:** in the same job, new raw versions are normalised into games,
+   sides and moves (one transaction per game), with a reference to the raw record and the
+   `parser_version`. Rejected games are recorded in `core.processing_failures`.
 6. Analysis jobs are enqueued for the latest `AUTO_ANALYSE_LATEST_N` standard-chess
    games; the rest can be requested on demand.
 7. **Analysis layer:** Stockfish evaluates each position. Evaluations and
    classifications are stored under an analysis run that records the engine version
    and full configuration.
 8. Analytics endpoints compute statistics with SQL at read time.
-9. Frontend polls job status and renders the dashboard.
+9. Client polls `GET /api/v1/jobs/{job_id}` and reads games through the API.
+
+Steps 1–5 and 9 are implemented and tested end to end in CI (Phase 5); steps 6–8
+arrive with Phase 6 (engine) and Phase 7 (analytics and dashboard).
 
 Each of steps 3–4, 5 and 7 can be **re-run on its own**: re-parse without re-fetching,
 or re-analyse with a new engine version without re-fetching or re-parsing.
@@ -136,7 +144,7 @@ Table-level design: [DATA_MODEL.md](DATA_MODEL.md).
 
 | Tool | Role in this project |
 |---|---|
-| **GitHub Actions** | Checks the *software* on every change: lint, tests (with Postgres), image build (ADR-013) |
+| **GitHub Actions** | Checks the *software* on every change: lint, tests (with Postgres), image build, and an end-to-end run of the whole stack against a Chess.com stub (ADR-013, ADR-022) |
 | **Docker** | Packages the application and its dependencies into an image that runs the same everywhere |
 | **Airflow** (later, V6) | Orchestrates the *data pipeline* on a schedule: ingestion, re-analysis, backfills |
 

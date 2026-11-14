@@ -40,9 +40,11 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Live tests call real third-party APIs: excluded by default and in CI. Run with -m live.
-addopts = "-ra --strict-markers -m 'not live'"
+# Excluded by default: live tests call real third-party APIs (never in CI); e2e tests need
+# the docker compose e2e stack running (CI starts it). Run them with -m live / -m e2e.
+addopts = "-ra --strict-markers -m 'not live and not e2e'"
 markers = [
     "integration: needs external services (Postgres via CHESS_TEST_DATABASE_URL)",
     "live: calls real third-party APIs over the network; opt-in only (pytest -m live)",
+    "e2e: drives the running docker compose e2e stack over HTTP (pytest -m e2e)",
 ]

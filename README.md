@@ -130,6 +130,15 @@ uv run ruff check . && uv run ruff format --check .
 Live tests are excluded by default and never run in CI; all other tests use mocked HTTP
 with synthetic data.
 
+End-to-end tests run the whole stack in Docker, with Chess.com replaced by a local stub
+(CI runs them on every PR):
+
+```bash
+docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example up -d --build --wait
+uv run pytest -m e2e
+docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example down -v
+```
+
 ## Contributing workflow
 
 `main` is protected: every change goes through a short-lived branch and a PR, and CI

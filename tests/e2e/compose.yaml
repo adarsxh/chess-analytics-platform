@@ -1,0 +1,28 @@
+# End-to-end test stack: the real compose stack, with Chess.com replaced by a local stub.
+#
+#   docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example \
+#     up -d --build --wait
+#   uv run pytest -m e2e
+#   docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example down -v
+#
+# Paths are relative to the repository root (the directory of the first compose file).
+
+services:
+  chesscom-stub:
+    image: python:3.13-slim
+    command: ["python", "/stub/stub_chesscom.py"]
+    volumes:
+      - ./tests/e2e:/stub:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  worker:
+    environment:
+      CHESS_CHESSCOM_BASE_URL: http://chesscom-stub:8080/pub
+      CHESS_WORKER_POLL_INTERVAL_SECONDS: "0.5"
+    depends_on:
+      chesscom-stub:
+        condition: service_healthy
