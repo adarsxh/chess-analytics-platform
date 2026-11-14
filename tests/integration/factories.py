@@ -13,6 +13,15 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from chess_analytics.domain.game import (
+    Color,
+    GameResult,
+    Outcome,
+    ParsedGame,
+    ParsedMove,
+    ParsedPlayer,
+    TimeClass,
+)
 from chess_analytics.storage.models.analysis import AnalysisConfig, GameAnalysis
 from chess_analytics.storage.models.core import Game, Player
 from chess_analytics.storage.models.raw import ArchiveFetch, IngestionRun, RawGame
@@ -104,6 +113,53 @@ def make_game_analysis(session: Session, game: Game, **overrides: Any) -> GameAn
         "moves_hash": game.moves_hash,
     }
     return add(session, GameAnalysis(**(values | overrides)))
+
+
+def parsed_moves(*sans_and_ucis: tuple[str, str]) -> tuple[ParsedMove, ...]:
+    return tuple(
+        ParsedMove(
+            ply=i,
+            san=san,
+            uci=uci,
+            fen_after=f"fen-{i}",
+            clock_ms=600_000 - i * 1000,
+            time_spent_ms=1000,
+        )  # fmt: skip
+        for i, (san, uci) in enumerate(sans_and_ucis, start=1)
+    )
+
+
+def make_parsed_game(**overrides: Any) -> ParsedGame:
+    """A platform-neutral game as a mapper would produce it (not stored)."""
+    game_id = overrides.pop("platform_game_id", _unique())
+    values = {
+        "platform": "chesscom",
+        "platform_game_id": game_id,
+        "url": f"https://www.chess.com/game/live/{game_id}",
+        "rules": "chess",
+        "time_class": TimeClass.RAPID,
+        "time_control": "600",
+        "base_seconds": 600,
+        "increment_seconds": 0,
+        "rated": True,
+        "start_time": datetime(2026, 10, 2, 18, 0, tzinfo=UTC),
+        "end_time": datetime(2026, 10, 2, 18, 10, tzinfo=UTC),
+        "result": GameResult.WHITE_WIN,
+        "termination": "white won by resignation",
+        "initial_fen": START_FEN,
+        "final_fen": "fen-2",
+        "moves": parsed_moves(("e4", "e2e4"), ("e5", "e7e5")),
+        "moves_hash": _unique(),
+        "source_eco": "C20",
+        "source_opening_name": "Kings Pawn Opening",
+        "white": ParsedPlayer(
+            Color.WHITE, "uuid-white", "WhitePlayer", 1500, "win", Outcome.WIN, None
+        ),  # fmt: skip
+        "black": ParsedPlayer(
+            Color.BLACK, "uuid-black", "BlackPlayer", 1480, "resigned", Outcome.LOSS, None
+        ),  # fmt: skip
+    }
+    return ParsedGame(**(values | overrides))
 
 
 @contextmanager
