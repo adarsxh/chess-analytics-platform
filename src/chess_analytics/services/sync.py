@@ -1,6 +1,7 @@
 """Sync a player: fetch their archives from a GameSource into the raw layer.
 
-DATA_MODEL.md §6 "Sync a player" (steps 1-3; processing into `core` is Phase 4).
+DATA_MODEL.md §6 "Sync a player", steps 1-4 (step 4, processing into `core`, is
+services.process; run here after a successful fetch, decision P2-a).
 
 Transaction boundaries, and why:
 1. Start: resolve the player, mark them tracked, open an ingestion run → commit, so
@@ -8,7 +9,9 @@ Transaction boundaries, and why:
 2. One transaction per archive: its fetch-log row, its raw games and the run counters
    commit together. An archive's ETag is therefore only stored once its games are, and
    a crash halfway keeps every archive already finished (the next sync skips them).
-3. Finish: close the run (succeeded / failed) and stamp the player's last sync.
+3. Process: every pending raw game into `core`, one transaction per game. Games stored
+   by a sync that then failed stay pending and are processed by the next run.
+4. Finish: close the run (succeeded / failed) and stamp the player's last sync.
 """
 
 from dataclasses import dataclass, field
@@ -17,6 +20,7 @@ import structlog
 from sqlalchemy.orm import Session, sessionmaker
 
 from chess_analytics.ingestion.base import ArchiveFetchResult, GameSource, SourceError
+from chess_analytics.services.process import process_pending
 from chess_analytics.storage.models.core import Player
 from chess_analytics.storage.models.raw import IngestionRun
 from chess_analytics.storage.repositories.players import PlayerRepository
@@ -35,6 +39,8 @@ class SyncSummary:
     archives_not_modified: int = 0
     games_seen: int = 0
     new_raw_versions: int = 0
+    games_processed: int = 0
+    games_rejected: int = 0
     error: str | None = field(default=None)
 
 
@@ -44,6 +50,7 @@ def sync_player(
     source: GameSource,
     session_factory: sessionmaker[Session],
     full_refresh: bool = False,
+    process: bool = True,
 ) -> SyncSummary:
     """Fetch every archive of `username` and store new raw game versions.
 
@@ -82,6 +89,10 @@ def sync_player(
                 games=len(result.games),
                 new_versions=new_versions,
             )
+        if process:
+            processed = process_pending(session_factory)
+            summary.games_processed = processed.processed
+            summary.games_rejected = processed.rejected
     except SourceError as exc:
         _finish(session_factory, summary, error=f"{type(exc).__name__}: {exc}")
         bound.warning("sync_failed", error=summary.error)
@@ -98,6 +109,8 @@ def sync_player(
         archives_not_modified=summary.archives_not_modified,
         games_seen=summary.games_seen,
         new_raw_versions=summary.new_raw_versions,
+        games_processed=summary.games_processed,
+        games_rejected=summary.games_rejected,
     )
     return summary
 
@@ -146,3 +159,5 @@ def _copy_counters(summary: SyncSummary, run: IngestionRun) -> None:
     run.archives_not_modified = summary.archives_not_modified
     run.games_seen = summary.games_seen
     run.new_raw_versions = summary.new_raw_versions
+    run.games_processed = summary.games_processed
+    run.games_failed = summary.games_rejected

@@ -13,9 +13,10 @@ from chess_analytics.ingestion.base import (
     SourcePlayer,
 )
 from chess_analytics.services.sync import sync_player
-from chess_analytics.storage.models.core import Player, TrackedPlayer
+from chess_analytics.storage.models.core import Game, Player, TrackedPlayer
 from chess_analytics.storage.models.raw import ArchiveFetch, IngestionRun, RawGame
 from tests.fakes import FakeGameSource
+from tests.samples import chesscom_game
 
 pytestmark = pytest.mark.integration
 
@@ -127,3 +128,28 @@ def test_unknown_player_writes_nothing(source, session_factory) -> None:
         sync_player("ghost", source=source, session_factory=session_factory)
     assert count(session_factory, IngestionRun) == 0
     assert count(session_factory, Player) == 0
+
+
+def test_sync_processes_new_games_into_core(session_factory) -> None:
+    valid = SourceGame(platform_game_id="game-1", payload=chesscom_game(uuid="game-1"))
+    source = FakeGameSource(
+        players={"someone": SourcePlayer("chesscom", "SomeOne", platform_player_id=77)},
+        archives={"someone": [OCT]},
+        games={OCT.url: (valid, game("not-a-real-game"))},  # second payload is malformed
+    )
+
+    summary = run_sync(source, session_factory)
+
+    assert (summary.games_processed, summary.games_rejected) == (1, 1)
+    assert count(session_factory, Game) == 1
+    with session_factory() as session:
+        run = session.get_one(IngestionRun, summary.run_id)
+        assert (run.games_processed, run.games_failed) == (1, 1)
+
+    nothing_new = run_sync(source, session_factory)
+    assert (nothing_new.games_processed, nothing_new.games_rejected) == (0, 0)
+
+
+def test_sync_can_skip_processing(source, session_factory) -> None:
+    summary = run_sync(source, session_factory, process=False)
+    assert (summary.games_processed, summary.games_rejected) == (0, 0)
