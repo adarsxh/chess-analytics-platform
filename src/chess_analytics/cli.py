@@ -5,6 +5,7 @@ settings, logging, the database and the source together; all logic lives in serv
 
     uv run python -m chess_analytics sync <username> [--full-refresh]
     uv run python -m chess_analytics process [--limit N]
+    uv run python -m chess_analytics request-sync <username>   # queue it for the worker
 
 Exit codes: 0 success, 1 sync failed or player not found, 2 invalid arguments.
 """
@@ -20,7 +21,7 @@ from chess_analytics.ingestion.base import PlayerNotFoundError
 from chess_analytics.ingestion.chesscom.client import ChessComClient
 from chess_analytics.logging_setup import configure_logging
 from chess_analytics.services.process import process_pending
-from chess_analytics.services.sync import sync_player
+from chess_analytics.services.sync import request_sync, sync_player
 from chess_analytics.storage.db import create_db_engine, create_session_factory
 
 
@@ -42,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         "process", help="process raw games that need it into the core tables"
     )
     process.add_argument("--limit", type=int, default=None, help="process at most N games")
+
+    queue = commands.add_parser(
+        "request-sync", help="queue a sync job for the worker instead of running it here"
+    )
+    queue.add_argument("username", help="Chess.com username (case-insensitive)")
     return parser
 
 
@@ -55,6 +61,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         session_factory = create_session_factory(engine)
         if args.command == "sync":
             return _sync(args, settings, session_factory)
+        if args.command == "request-sync":
+            return _request_sync(args, session_factory)
         return _process(args, session_factory)
     finally:
         engine.dispose()
@@ -92,4 +100,13 @@ def _process(args: argparse.Namespace, session_factory: sessionmaker[Session]) -
         f"pending {summary.pending} | processed {summary.processed} | "
         f"rejected {summary.rejected} (see core.processing_failures)"
     )
+    return 0
+
+
+def _request_sync(args: argparse.Namespace, session_factory: sessionmaker[Session]) -> int:
+    job_id, created = request_sync(
+        session_factory, platform=ChessComClient.platform, username=args.username
+    )
+    state = "queued" if created else "already queued or running"
+    print(f"sync job {job_id} for {args.username}: {state}")
     return 0

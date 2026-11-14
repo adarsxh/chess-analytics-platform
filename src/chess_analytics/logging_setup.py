@@ -52,3 +52,6 @@ def configure_logging(level: str = "INFO", fmt: Literal["console", "json"] = "js
     root.handlers.clear()  # idempotent: calling twice must not duplicate output
     root.addHandler(handler)
     root.setLevel(level)
+    # The HTTP client logs every request at INFO; our own events already say what matters.
+    for noisy in ("httpx2", "httpcore"):
+        logging.getLogger(noisy).setLevel(max(logging.WARNING, root.level))

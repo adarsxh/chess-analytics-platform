@@ -74,6 +74,20 @@ uv run python -m chess_analytics process --limit 50
 Games that are not processed (variants such as odds chess, or inconsistent data) are
 listed with the reason in `core.processing_failures`.
 
+## Background worker
+
+Long-running work (syncs now, engine analysis later) runs in a separate worker process
+that takes jobs from a Postgres queue (`ops.jobs`).
+
+```bash
+uv run python -m chess_analytics.worker               # run a worker (Ctrl+C finishes the current job)
+uv run python -m chess_analytics request-sync <user>  # queue a sync for it
+```
+
+In Docker, `docker compose up` starts a worker next to the API; add workers with
+`docker compose up --scale worker=3`. Duplicate requests for the same player return the
+job already queued; failed jobs are retried with backoff (30 s, 2 min, 8 min).
+
 ## Database migrations
 
 The schema is managed by [Alembic](https://alembic.sqlalchemy.org/). Migrations run as an

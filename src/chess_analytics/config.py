@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     )
     chesscom_timeout_seconds: float = Field(default=15.0, gt=0)
 
+    # Worker (python -m chess_analytics.worker). The lease is how long a job stays
+    # reserved without a heartbeat; heartbeats are sent every lease / 3.
+    worker_poll_interval_seconds: float = Field(default=2.0, gt=0)
+    worker_lease_seconds: int = Field(default=60, ge=10)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _uppercase_log_level(cls, value: object) -> object:
