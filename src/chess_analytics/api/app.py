@@ -12,12 +12,14 @@ import structlog
 from fastapi import FastAPI
 
 from chess_analytics import __version__
-from chess_analytics.api.routes import health
+from chess_analytics.api.routes import games, health, jobs, players
 from chess_analytics.config import Settings, get_settings
 from chess_analytics.logging_setup import configure_logging
-from chess_analytics.storage.db import create_db_engine
+from chess_analytics.storage.db import create_db_engine, create_session_factory
 
 log = structlog.get_logger(__name__)
+
+API_V1 = "/api/v1"
 
 
 @asynccontextmanager
@@ -25,6 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Runs once at startup (before `yield`) and once at shutdown (after).
     settings: Settings = app.state.settings
     app.state.engine = create_db_engine(settings)  # lazy: no connection opened yet
+    app.state.session_factory = create_session_factory(app.state.engine)
     log.info("api_started", env=settings.env, version=__version__)
     try:
         yield
@@ -39,5 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Chess Analytics API", version=__version__, lifespan=lifespan)
     app.state.settings = settings
-    app.include_router(health.router)
+    app.include_router(health.router)  # unversioned: infrastructure checks, not clients
+    for router in (players.router, jobs.router, games.router):
+        app.include_router(router, prefix=API_V1)  # decision Q1-a
     return app

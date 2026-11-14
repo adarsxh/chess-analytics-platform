@@ -1,0 +1,148 @@
+"""Response models: the API's public contract (what clients such as the dashboard see).
+
+Kept separate from the database models on purpose: tables can change shape without
+breaking clients, and nothing internal leaks out (e.g. lineage ids, worker names).
+"""
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Literal, Self
+
+from pydantic import BaseModel, Field
+
+from chess_analytics.storage.models.ops import Job
+
+USERNAME_PATTERN = r"^[A-Za-z0-9_-]{1,50}$"  # Chess.com usernames
+
+Platform = Literal["chesscom"]
+TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
+Outcome = Literal["win", "loss", "draw"]
+JobStatus = Literal["queued", "running", "succeeded", "failed"]
+
+
+# ------------------------------------------------------------------- jobs ---
+
+
+class JobResponse(BaseModel):
+    job_id: int
+    job_type: str
+    status: JobStatus
+    payload: dict[str, Any]
+    attempts: int
+    max_attempts: int
+    last_error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+    @classmethod
+    def from_job(cls, job: Job, **extra: Any) -> Self:
+        """Build from a job row; `extra` fills fields a subclass adds (e.g. `created`)."""
+        return cls(
+            **extra,
+            job_id=job.id,
+            job_type=job.job_type,
+            status=job.status,
+            payload=job.payload,
+            attempts=job.attempts,
+            max_attempts=job.max_attempts,
+            last_error=job.last_error,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        )
+
+
+class SyncRequestedResponse(JobResponse):
+    created: bool = Field(description="False if an identical sync was already queued or running")
+
+
+# ---------------------------------------------------------------- players ---
+
+
+class Record(BaseModel):
+    games: int
+    wins: int
+    losses: int
+    draws: int
+
+
+class PlayerResponse(BaseModel):
+    platform: Platform
+    username: str
+    platform_uuid: str | None
+    tracked: bool
+    last_synced_at: datetime | None
+    record: Record
+
+
+# ------------------------------------------------------------------ games ---
+
+
+class GameSummary(BaseModel):
+    """One game from the requested player's point of view."""
+
+    game_id: int
+    platform_game_id: str
+    url: str
+    end_time: datetime
+    time_class: TimeClass
+    time_control: str
+    rated: bool
+    ply_count: int
+    eco: str | None
+    opening_name: str | None = Field(description="Approximate, from Chess.com's opening URL")
+    color: Literal["white", "black"]
+    outcome: Outcome
+    result_code: str
+    rating_after: int | None
+    accuracy: Decimal | None
+    opponent_username: str
+    opponent_rating_after: int | None
+
+
+class GamePage(BaseModel):
+    items: list[GameSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class Side(BaseModel):
+    username: str
+    rating_after: int | None
+    outcome: Outcome
+    result_code: str
+    accuracy: Decimal | None
+
+
+class Move(BaseModel):
+    ply: int
+    san: str
+    uci: str
+    fen_after: str
+    clock_ms: int | None
+    time_spent_ms: int | None
+
+
+class GameDetail(BaseModel):
+    game_id: int
+    platform: Platform
+    platform_game_id: str
+    url: str
+    rules: str
+    time_class: TimeClass
+    time_control: str
+    rated: bool
+    start_time: datetime | None
+    end_time: datetime
+    result: Literal["white_win", "black_win", "draw"]
+    termination: str | None
+    eco: str | None
+    opening_name: str | None
+    initial_fen: str
+    final_fen: str
+    ply_count: int
+    white: Side
+    black: Side
+    moves: list[Move]
