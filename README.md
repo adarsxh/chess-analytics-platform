@@ -63,6 +63,17 @@ Each monthly archive is fetched with its stored ETag, so unchanged months cost o
 `304 Not Modified` request. Games are stored as received in `raw.raw_games`; re-running
 is always safe. Every sync is recorded in `raw.ingestion_runs`.
 
+After fetching, `sync` processes new games into `core.games`, `core.game_players` and
+`core.game_moves`. To (re)process on its own, e.g. after bumping `PARSER_VERSION`:
+
+```bash
+uv run python -m chess_analytics process            # everything that needs processing
+uv run python -m chess_analytics process --limit 50
+```
+
+Games that are not processed (variants such as odds chess, or inconsistent data) are
+listed with the reason in `core.processing_failures`.
+
 ## Database migrations
 
 The schema is managed by [Alembic](https://alembic.sqlalchemy.org/). Migrations run as an
