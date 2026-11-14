@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # out of logs and reprs; call .get_secret_value() only where the URL is actually used.
     database_url: SecretStr
 
+    # Chess.com public API. Chess.com asks clients to identify themselves with a
+    # User-Agent that includes a way to contact the maintainer. The default points to
+    # the project repository; add personal contact details only in your own .env.
+    chesscom_base_url: str = "https://api.chess.com/pub"
+    chesscom_user_agent: str = (
+        "chess-analytics-platform/0.1 (+https://github.com/adarsxh/chess-analytics-platform)"
+    )
+    chesscom_timeout_seconds: float = Field(default=15.0, gt=0)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _uppercase_log_level(cls, value: object) -> object:

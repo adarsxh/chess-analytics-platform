@@ -7,16 +7,17 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.162.4",
+    "httpx2>=2.16.0",
     "psycopg[binary]>=3.3.8",
     "pydantic-settings>=2.16.2",
     "sqlalchemy>=2.1.8",
     "structlog>=26.1.0",
+    "tenacity>=9.2.1",
     "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.16.0",
     "pytest>=9.2.0",
     "ruff>=0.17.4",
 ]
@@ -38,7 +39,9 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# Live tests call real third-party APIs: excluded by default and in CI. Run with -m live.
+addopts = "-ra --strict-markers -m 'not live'"
 markers = [
     "integration: needs external services (Postgres via CHESS_TEST_DATABASE_URL)",
+    "live: calls real third-party APIs over the network; opt-in only (pytest -m live)",
 ]

@@ -74,8 +74,12 @@ not a guarantee.
 uv run pytest                    # unit tests; integration tests are skipped
 CHESS_TEST_DATABASE_URL=postgresql+psycopg://chess:change-me@localhost:5432/chess_analytics \
   uv run pytest -m integration   # integration tests against the compose Postgres
+uv run pytest -m live            # opt-in: smoke test against the real Chess.com API
 uv run ruff check . && uv run ruff format --check .
 ```
+
+Live tests are excluded by default and never run in CI; all other tests use mocked HTTP
+with synthetic data.
 
 ## Contributing workflow
 
