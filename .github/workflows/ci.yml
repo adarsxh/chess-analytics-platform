@@ -100,3 +100,21 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Smoke test the image
         run: docker run --rm chess-analytics-api:ci python -c "import chess_analytics; print(chess_analytics.__version__)"
+
+      # End-to-end: the real stack (db → migrate → api + worker) built from the image above,
+      # with Chess.com replaced by a local stub (CI never calls the real API). The tests
+      # drive it over HTTP: request a sync, wait for the worker, read the games back.
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install test dependencies
+        run: uv sync --locked
+      - name: Start the e2e stack
+        env:
+          CHESS_IMAGE: chess-analytics-api:ci
+        run: docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example up -d --no-build --wait
+      - name: Run end-to-end tests
+        run: uv run pytest -m e2e -v
+      - name: Show stack logs on failure
+        if: failure()
+        run: docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example logs --no-color

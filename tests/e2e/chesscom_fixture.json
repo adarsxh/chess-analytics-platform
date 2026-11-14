@@ -1,0 +1,68 @@
+{
+  "profile": {
+    "username": "e2e_player",
+    "player_id": 1001,
+    "status": "basic"
+  },
+  "archives": [
+    "http://chesscom-stub:8080/pub/player/e2e_player/games/2026/10"
+  ],
+  "games": {
+    "2026/10": [
+      {
+        "uuid": "e2e-game-1",
+        "url": "https://www.chess.com/game/live/e2e-game-1",
+        "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Result \"0-1\"]\n[ECO \"C20\"]\n[ECOUrl \"https://www.chess.com/openings/Kings-Pawn-Opening\"]\n[UTCDate \"2026.10.02\"]\n[UTCTime \"18:30:05\"]\n[TimeControl \"600\"]\n[Termination \"e2e_player won by checkmate\"]\n\n1. f3 {[%clk 0:09:58]} 1... e5 {[%clk 0:09:59]} 2. g4 {[%clk 0:09:50.5]} 2... Qh4# {[%clk 0:09:57.2]} 0-1\n",
+        "time_control": "600",
+        "end_time": 1790015405,
+        "rated": true,
+        "fen": "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3",
+        "initial_setup": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "time_class": "rapid",
+        "rules": "chess",
+        "eco": "https://www.chess.com/openings/Kings-Pawn-Opening",
+        "white": {
+          "username": "opponent_one",
+          "uuid": "uuid-opponent_one",
+          "rating": 1500,
+          "result": "checkmated",
+          "@id": "http://chesscom-stub:8080/pub/player/opponent_one"
+        },
+        "black": {
+          "username": "e2e_player",
+          "uuid": "uuid-e2e_player",
+          "rating": 1480,
+          "result": "win",
+          "@id": "http://chesscom-stub:8080/pub/player/e2e_player"
+        }
+      },
+      {
+        "uuid": "e2e-game-2",
+        "url": "https://www.chess.com/game/live/e2e-game-2",
+        "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Result \"1-0\"]\n[ECO \"C20\"]\n[ECOUrl \"https://www.chess.com/openings/Kings-Pawn-Opening\"]\n[UTCDate \"2026.10.02\"]\n[UTCTime \"18:30:05\"]\n[TimeControl \"600\"]\n[Termination \"e2e_player won by checkmate\"]\n\n1. e4 {[%clk 0:09:58]} 1... e5 {[%clk 0:09:57]} 2. Bc4 {[%clk 0:09:50]} 2... Nc6 {[%clk 0:09:55]} 3. Qh5 {[%clk 0:09:41]} 3... Nf6 {[%clk 0:09:40]} 4. Qxf7# {[%clk 0:09:33]} 1-0\n",
+        "time_control": "600",
+        "end_time": 1790019005,
+        "rated": true,
+        "fen": "r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4",
+        "initial_setup": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "time_class": "rapid",
+        "rules": "chess",
+        "eco": "https://www.chess.com/openings/Kings-Pawn-Opening",
+        "white": {
+          "username": "e2e_player",
+          "uuid": "uuid-e2e_player",
+          "rating": 1500,
+          "result": "win",
+          "@id": "http://chesscom-stub:8080/pub/player/e2e_player"
+        },
+        "black": {
+          "username": "opponent_two",
+          "uuid": "uuid-opponent_two",
+          "rating": 1480,
+          "result": "checkmated",
+          "@id": "http://chesscom-stub:8080/pub/player/opponent_two"
+        }
+      }
+    ]
+  }
+}
