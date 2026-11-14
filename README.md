@@ -88,6 +88,19 @@ In Docker, `docker compose up` starts a worker next to the API; add workers with
 `docker compose up --scale worker=3`. Duplicate requests for the same player return the
 job already queued; failed jobs are retried with backoff (30 s, 2 min, 8 min).
 
+## API
+
+Interactive docs: http://127.0.0.1:8000/docs (with the API running). Business endpoints are
+versioned under `/api/v1`; `/health` and `/health/ready` are not.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/v1/players/{username}/sync` | Queue a sync → `202` + job (duplicates return the same job) |
+| GET | `/api/v1/jobs/{job_id}` | Job status: queued / running / succeeded / failed |
+| GET | `/api/v1/players/{username}` | Profile and win/loss/draw record |
+| GET | `/api/v1/players/{username}/games` | Games, newest first: `limit`, `offset`, `time_class`, `outcome`, `rated` |
+| GET | `/api/v1/games/{game_id}` | One game with both sides and moves (`include_moves=false` to skip) |
+
 ## Database migrations
 
 The schema is managed by [Alembic](https://alembic.sqlalchemy.org/). Migrations run as an
