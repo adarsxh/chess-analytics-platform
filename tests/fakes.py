@@ -8,6 +8,7 @@ from chess_analytics.ingestion.base import (
     PlayerNotFoundError,
     SourceGame,
     SourcePlayer,
+    SourceUnavailableError,
 )
 
 
@@ -21,6 +22,7 @@ class FakeGameSource:
     archives: dict[str, list[ArchiveRef]] = field(default_factory=dict)
     games: dict[str, tuple[SourceGame, ...]] = field(default_factory=dict)  # key: archive url
     fetched: list[str] = field(default_factory=list)  # archive urls, in request order
+    failing_urls: set[str] = field(default_factory=set)  # these archives raise on fetch
 
     def get_player(self, username: str) -> SourcePlayer:
         try:
@@ -33,6 +35,8 @@ class FakeGameSource:
 
     def fetch_archive(self, archive: ArchiveRef, *, etag: str | None = None) -> ArchiveFetchResult:
         self.fetched.append(archive.url)
+        if archive.url in self.failing_urls:
+            raise SourceUnavailableError(f"{archive.url} returned 503 after 4 attempts")
         games = self.games.get(archive.url, ())
         current = f'"{hash(tuple(g.platform_game_id for g in games))}"'
         if etag == current:

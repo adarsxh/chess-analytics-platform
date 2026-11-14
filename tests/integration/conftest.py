@@ -19,7 +19,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, create_engine, make_url, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -90,3 +90,18 @@ def session(migrated_engine: Engine) -> Iterator[Session]:
             finally:
                 db.close()
                 outer.rollback()
+
+
+@pytest.fixture
+def session_factory(migrated_engine: Engine) -> Iterator[sessionmaker[Session]]:
+    """A session factory for code that manages its own transactions (services).
+
+    Every session it creates joins one outer transaction via SAVEPOINTs, so the code's
+    commits are real from its point of view, yet everything is rolled back afterwards.
+    """
+    with migrated_engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            yield sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
+        finally:
+            outer.rollback()

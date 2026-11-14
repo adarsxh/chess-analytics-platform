@@ -52,6 +52,17 @@ docker compose up --build        # db → migrate (one-off) → api; Ctrl+C to s
 docker compose down              # stop containers (add -v to also delete DB data)
 ```
 
+## Syncing games from Chess.com
+
+```bash
+uv run python -m chess_analytics sync <username>                  # incremental
+uv run python -m chess_analytics sync <username> --full-refresh   # ignore stored ETags
+```
+
+Each monthly archive is fetched with its stored ETag, so unchanged months cost one cheap
+`304 Not Modified` request. Games are stored as received in `raw.raw_games`; re-running
+is always safe. Every sync is recorded in `raw.ingestion_runs`.
+
 ## Database migrations
 
 The schema is managed by [Alembic](https://alembic.sqlalchemy.org/). Migrations run as an
