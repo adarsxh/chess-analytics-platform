@@ -58,3 +58,9 @@ def test_ignores_unrelated_keys_in_env_file(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(f"CHESS_DATABASE_URL={DB_URL}\nPOSTGRES_PASSWORD=x\n")
     assert Settings(_env_file=env_file).database_url.get_secret_value() == DB_URL
+
+
+def test_default_chesscom_user_agent_names_the_project_without_personal_details() -> None:
+    agent = make_settings(database_url=DB_URL).chesscom_user_agent
+    assert "github.com/adarsxh/chess-analytics-platform" in agent
+    assert "@" not in agent  # contact details are opt-in via the user's own .env
