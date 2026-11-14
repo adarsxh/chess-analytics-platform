@@ -60,6 +60,8 @@ internal boundaries, deployed as a small number of processes:
 | `classification` | Pure functions: evaluation sequence → inaccuracy / mistake / blunder | engine internals, storage |
 | `analytics` | Player and game metrics (W/L/D, rating series, openings, error rates) | api, frontend |
 | `storage` | Table definitions, sessions, repositories, idempotent upserts | api, business rules |
+| `services` | Use cases that orchestrate adapters and repositories (e.g. `sync_player`); the one place `ingestion` and `storage` meet | api, specific platforms |
+| `cli` | `python -m chess_analytics`: thin entry point that wires settings, DB and adapters, then calls services | business logic |
 | `jobs` | Postgres-backed queue (enqueue / claim / complete / fail) and job handlers | api |
 | `api` | Thin HTTP layer: request/response schemas, routing | SQL details, engine details |
 | `worker` | Loop that claims jobs and dispatches them to handlers | api |

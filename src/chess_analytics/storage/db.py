@@ -6,6 +6,7 @@ is opened lazily when something actually queries the database.
 """
 
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from chess_analytics.config import Settings
 
@@ -21,6 +22,12 @@ def create_db_engine(settings: Settings) -> Engine:
         pool_pre_ping=True,
         connect_args={"connect_timeout": _CONNECT_TIMEOUT_SECONDS},
     )
+
+
+def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+    """A factory for ORM sessions. Use `with factory.begin() as session:` for one
+    transaction that commits on success and rolls back on an exception."""
+    return sessionmaker(engine)
 
 
 def check_connection(engine: Engine) -> None:
