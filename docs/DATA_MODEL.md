@@ -233,14 +233,16 @@ Index `(analysis_config_id)` for "all games analysed with config X".
 | ply | smallint | 0 = initial position; n = after ply n |
 | pv_rank | smallint | 1 = best line (always 1 while MultiPV = 1) |
 | score_cp | integer, nullable | Centipawns, **White's point of view** |
-| mate_in | smallint, nullable | Signed: `+n` White mates, `-n` Black mates |
+| mate_in | smallint, nullable | Signed: `+n` White mates, `-n` Black mates, `0` side to move is checkmated |
 | best_move_uci | text, nullable | Null in terminal positions |
 | pv_uci | text[], nullable | First moves of the principal variation |
 | depth_reached | smallint | |
 | nodes_searched | bigint | |
 
 PK `(game_analysis_id, ply, pv_rank)`; `CHECK` exactly one of `score_cp`, `mate_in` is non-null.
-Terminal positions (checkmate, stalemate) are handled when the engine step is designed.
+Terminal positions are not searched (ADR-023): checkmate is stored as `mate_in = 0`,
+draws by rule (stalemate, insufficient material, 75-move, fivefold) as `score_cp = 0`,
+both with `best_move_uci` null and `depth_reached = nodes_searched = 0`.
 
 **`analysis.move_classifications`**: classifier output per move.
 
@@ -249,10 +251,11 @@ Terminal positions (checkmate, stalemate) are handled when the engine step is de
 | game_analysis_id | bigint FK (CASCADE) | |
 | ply | smallint | 1-based (a move) |
 | classifier_version | integer | |
-| label | text | Allowed values defined with the classifier (CHECK added then) |
-| eval_loss | numeric | The quantity the classifier used (cp or win-probability loss) |
+| label | text | `forced`, `best`, `excellent`, `good`, `inaccuracy`, `mistake`, `blunder` (CHECK) |
+| eval_loss | numeric | The quantity the classifier used; v1: the mover's win-% loss, 0–100 (CHECK ≥ 0) |
 
-PK `(game_analysis_id, ply, classifier_version)`.
+PK `(game_analysis_id, ply, classifier_version)`. Classifier v1 is defined in ADR-024;
+the label CHECK was added in migration 0004.
 
 ### 4.4 `ops`
 

@@ -2,7 +2,9 @@
 
 from sqlalchemy import BigInteger, DateTime, String
 
+from chess_analytics.classification.moves import Label
 from chess_analytics.storage.models import metadata
+from chess_analytics.storage.models.analysis import MOVE_LABELS
 from chess_analytics.storage.schema import SCHEMAS
 
 
@@ -35,3 +37,9 @@ def test_timestamps_are_timezone_aware_and_no_varchar() -> None:
             # String with a length = varchar(n); ADR-019 says text.
             if isinstance(column.type, String):
                 assert column.type.length is None, f"{table.fullname}.{column.name} is varchar"
+
+
+def test_database_labels_match_the_classifier() -> None:
+    # Storage doesn't import the classifier (dependency rule), so the allowed values are
+    # written twice; this keeps them equal. Migration 0004 holds a frozen copy.
+    assert set(MOVE_LABELS) == {label.value for label in Label}

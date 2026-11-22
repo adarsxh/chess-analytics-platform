@@ -57,7 +57,7 @@ internal boundaries, deployed as a small number of processes:
 | `ingestion/chesscom` | Chess.com HTTP client (rate limits, retries) and the Chess.com → domain mapping | other adapters |
 | `parsing` | Platform-neutral PGN → moves/positions (via `python-chess`) | any specific platform |
 | `engine` | Stockfish wrapper; analysis configuration (engine version, node limit, threads) | ingestion, api |
-| `classification` | Pure functions: evaluation sequence → inaccuracy / mistake / blunder | engine internals, storage |
+| `classification` | Pure functions: evaluation sequence → move labels by win-probability loss (ADR-024) | engine internals, storage |
 | `analytics` | Player and game metrics (W/L/D, rating series, openings, error rates) | api, frontend |
 | `storage` | Table definitions, sessions, repositories, idempotent upserts | api, business rules |
 | `services` | Use cases that orchestrate adapters and repositories (e.g. `sync_player`); the one place `ingestion` and `storage` meet | api, specific platforms |

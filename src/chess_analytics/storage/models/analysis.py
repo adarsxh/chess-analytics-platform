@@ -92,11 +92,16 @@ class PositionEvaluation(Base):
     ply: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     pv_rank: Mapped[int] = mapped_column(SmallInteger, primary_key=True, server_default="1")
     score_cp: Mapped[int | None]
-    mate_in: Mapped[int | None] = mapped_column(SmallInteger)  # +n White mates, -n Black mates
+    # +n White mates, -n Black mates, 0 = the side to move is checkmated (terminal position)
+    mate_in: Mapped[int | None] = mapped_column(SmallInteger)
     best_move_uci: Mapped[str | None]  # null in terminal positions
     pv_uci: Mapped[list[str] | None]  # first moves of the principal variation
     depth_reached: Mapped[int] = mapped_column(SmallInteger)
     nodes_searched: Mapped[int] = mapped_column(BigInteger)
+
+
+# The classifier's labels (classification.moves.Label; a unit test keeps the two equal).
+MOVE_LABELS = ("forced", "best", "excellent", "good", "inaccuracy", "mistake", "blunder")
 
 
 class MoveClassification(Base):
@@ -106,6 +111,8 @@ class MoveClassification(Base):
     __table_args__ = (
         CheckConstraint("ply >= 1", name="ply_positive"),
         CheckConstraint("classifier_version >= 1", name="classifier_version_positive"),
+        one_of("label", MOVE_LABELS),
+        CheckConstraint("eval_loss >= 0", name="eval_loss_non_negative"),
         {"schema": ANALYSIS},
     )
 
@@ -114,5 +121,5 @@ class MoveClassification(Base):
     )
     ply: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     classifier_version: Mapped[int] = mapped_column(primary_key=True)
-    label: Mapped[str]  # allowed values are fixed when the classifier is designed
-    eval_loss: Mapped[Decimal]  # the quantity the classifier used (cp or win-probability)
+    label: Mapped[str]
+    eval_loss: Mapped[Decimal]  # classifier v1: the mover's win-% loss, 0–100 (ADR-024)

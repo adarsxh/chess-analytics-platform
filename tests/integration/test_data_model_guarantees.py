@@ -189,12 +189,29 @@ def test_reclassification_adds_a_version_and_removal_cascades(session: Session) 
     for version in (1, 2):
         add(session, MoveClassification(game_analysis_id=analysis.id, ply=1,
                                         classifier_version=version, label="mistake",
-                                        eval_loss=120))  # fmt: skip
+                                        eval_loss=12))  # fmt: skip
     assert session.scalar(select(func.count()).select_from(MoveClassification)) == 2
 
     session.delete(analysis)
     session.flush()
     assert session.scalar(select(func.count()).select_from(MoveClassification)) == 0
+
+
+@pytest.mark.parametrize(
+    ("label", "eval_loss", "constraint"),
+    [
+        ("brilliant", 0, "ck_move_classifications_label"),  # not a v1 label
+        ("Mistake", 12, "ck_move_classifications_label"),  # labels are lower-case
+        ("mistake", -1, "ck_move_classifications_eval_loss_non_negative"),
+    ],
+)
+def test_classification_labels_and_losses_are_constrained(
+    session: Session, label: str, eval_loss: int, constraint: str
+) -> None:
+    analysis = make_game_analysis(session, make_game(session))
+    with violates(session, constraint):
+        add(session, MoveClassification(game_analysis_id=analysis.id, ply=1, classifier_version=1,
+                                        label=label, eval_loss=eval_loss))  # fmt: skip
 
 
 # ------------------------------------------------------------------ jobs ---
