@@ -76,6 +76,22 @@ uv run python -m chess_analytics process --limit 50
 Games that are not processed (variants such as odds chess, or inconsistent data) are
 listed with the reason in `core.processing_failures`.
 
+## Analysing games with Stockfish
+
+Each position is evaluated by Stockfish (300k nodes, 1 thread: reproducible, ≈ 0.6 s per
+position) and every move is labelled by how much win probability it cost the mover:
+`best`, `excellent`, `good`, `inaccuracy`, `mistake`, `blunder` or `forced` (ADR-024).
+These are this project's own classifications, not Chess.com's.
+
+```bash
+uv run python -m chess_analytics analyse --player <user> --latest 5   # newest unanalysed games
+uv run python -m chess_analytics analyse <game_id> [<game_id> ...]
+```
+
+Re-running is safe: up-to-date games are skipped, a new classifier version re-labels the
+stored evaluations without the engine, and different engine settings add a new analysis
+next to the old one. A game whose moves changed since its analysis is analysed again.
+
 ## Background worker
 
 Long-running work (syncs now, engine analysis later) runs in a separate worker process
