@@ -725,3 +725,47 @@ produced each result must be recorded.
 - (−) A Homebrew upgrade can move local development to a newer version than Docker; this
   is visible (different `engine_version`, hence a different analysis config), not silent.
 - (−) Upgrading Stockfish means updating the version and both checksums in one script.
+
+---
+
+## ADR-024: Move classification by win-probability loss (classifier v1)
+
+- **Status:** Accepted · **Date:** 2026-11-23
+
+### Context
+Each move needs a label (best … blunder) derived from engine evaluations of the position
+before and after it. The same centipawn swing means very different things depending on
+the position: +900 → +600 still wins, 0 → −300 is a serious error. The method was
+deferred in Phase 2 (ADR-017 made classifications versioned and re-derivable).
+
+### Decision
+- **Win probability.** Each score becomes White's expected win %:
+  `50 + 50 · (2 / (1 + e^(−0.00368208 · cp)) − 1)` (the curve Lichess publishes), with
+  cp clamped to ±1000. Mate for a side = 100 % for it; `mate 0` = the side to move lost.
+- **Loss** = the mover's win % before the move − after it, floored at 0, rounded to 0.01.
+  Both players' moves are classified. The rounded loss is stored as `eval_loss` and is
+  what the thresholds compare, so every label can be re-derived from its row.
+- **Labels** (in order of precedence):
+  - `forced`: the only legal move;
+  - `best`: the engine's first choice in the position before;
+  - otherwise by loss: `excellent` < 2 ≤ `good` < 10 ≤ `inaccuracy` < 20 ≤ `mistake`
+    < 30 ≤ `blunder`.
+- **`CLASSIFIER_VERSION = 1`.** Changing the curve, thresholds or labels means a new
+  version (new rows, no engine re-run). Allowed labels are a DB `CHECK` (migration 0004).
+- **No `brilliant` / `great` in V1.** Both depend on how good the *second-best* move was
+  (a sacrifice that is the only good move), which needs MultiPV 2 (planned for V2).
+- **These are our classifications.** They follow published, documented rules and are not
+  a reproduction of Chess.com's (proprietary) labels; numbers will differ.
+
+### Alternatives
+- **Centipawn-loss thresholds (e.g. 50 / 100 / 300):** simple, but call harmless moves in
+  decided positions blunders and need special cases for mate scores.
+- **Heuristic brilliant / great detection without MultiPV:** labels we couldn't defend.
+- **Expected-points models trained on rating:** more accurate per rating band, but needs
+  data and a model we don't have.
+
+### Consequences
+- (+) Labels match intuition in winning, losing and equal positions; mate needs no special case.
+- (+) Thresholds can be tuned later without re-running Stockfish.
+- (−) The curve is not rating-aware: a 10 % drop is judged the same at 800 and at 2400.
+- (−) With MultiPV 1 a non-engine move that is equally good is `excellent`, not `best`.
