@@ -2,7 +2,9 @@
 #
 # Multi-stage build:
 #   builder: has uv, resolves and installs dependencies + our package into /app/.venv
-#   runtime: copies only that virtualenv. No uv, no build tools, no source tree.
+#   engine:  downloads the pinned Stockfish release and verifies its checksum
+#   runtime: copies only the virtualenv and the engine binary. No uv, no build tools,
+#            no source tree, no curl.
 
 ARG PYTHON_IMAGE=python:3.13-slim
 
@@ -30,6 +32,15 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 
+# ----------------------------------------------------------------- engine ---
+FROM ${PYTHON_IMAGE} AS engine
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/install-stockfish.sh /tmp/install-stockfish.sh
+RUN /tmp/install-stockfish.sh /opt/stockfish/stockfish
+
 # ---------------------------------------------------------------- runtime ---
 FROM ${PYTHON_IMAGE} AS runtime
 
@@ -38,6 +49,7 @@ RUN groupadd --system app && useradd --system --gid app --no-create-home app
 WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=engine /opt/stockfish/stockfish /usr/local/bin/stockfish
 # Migrations ship with the image so the same image can run `alembic upgrade head`
 # as a separate step before the app starts (ADR-020).
 COPY --chown=app:app alembic.ini ./alembic.ini

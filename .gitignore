@@ -26,6 +26,8 @@ data/
 *.duckdb
 stockfish*
 !src/**/stockfish*.py
+# where CI's scripts/install-stockfish.sh puts the binary
+/.stockfish/
 
 # OS / editors
 .DS_Store

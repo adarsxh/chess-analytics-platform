@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     worker_poll_interval_seconds: float = Field(default=2.0, gt=0)
     worker_lease_seconds: int = Field(default=60, ge=10)
 
+    # Stockfish (ADR-004). Changing nodes or hash creates a new analysis config, so results
+    # from different settings are never mixed. Threads is fixed at 1 for reproducibility.
+    # 300k nodes ≈ depth 18, ≈ 0.6 s per position on an Apple M-series core.
+    engine_path: str = "stockfish"  # a command on PATH, or an absolute path
+    engine_nodes_per_position: int = Field(default=300_000, gt=0)
+    engine_hash_mb: int = Field(default=64, ge=1)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _uppercase_log_level(cls, value: object) -> object:
