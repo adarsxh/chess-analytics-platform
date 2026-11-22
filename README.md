@@ -32,7 +32,9 @@ talks to the backend only over HTTP.
 
 ## Development setup
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), Python 3.13 (uv can install it), Docker.
+Prerequisites: [uv](https://docs.astral.sh/uv/), Python 3.13 (uv can install it), Docker,
+and Stockfish for engine analysis (`brew install stockfish`; the Docker image ships the
+pinned version from `scripts/install-stockfish.sh`).
 
 ```bash
 uv sync                          # create .venv and install the project + dev tools
@@ -120,7 +122,7 @@ not a guarantee.
 ## Running tests
 
 ```bash
-uv run pytest                    # unit tests; integration tests are skipped
+uv run pytest                    # unit + engine tests; integration tests are skipped
 CHESS_TEST_DATABASE_URL=postgresql+psycopg://chess:change-me@localhost:5432/chess_analytics \
   uv run pytest -m integration   # integration tests against the compose Postgres
 uv run pytest -m live            # opt-in: smoke test against the real Chess.com API
@@ -128,7 +130,9 @@ uv run ruff check . && uv run ruff format --check .
 ```
 
 Live tests are excluded by default and never run in CI; all other tests use mocked HTTP
-with synthetic data.
+with synthetic data. Engine tests (`tests/engine`) run a real Stockfish found on `PATH`
+(or `CHESS_TEST_ENGINE_PATH`) and are skipped locally if none is installed; CI installs
+the pinned version and requires them.
 
 End-to-end tests run the whole stack in Docker, with Chess.com replaced by a local stub
 (CI runs them on every PR):

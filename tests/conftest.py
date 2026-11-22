@@ -4,9 +4,12 @@ Test categories:
 - unit tests (tests/unit): no external services; always run.
 - integration tests (tests/integration, marked `integration`): need a real Postgres,
   given by CHESS_TEST_DATABASE_URL. Skipped when that variable is not set.
+- engine tests (tests/engine, marked `engine`): run a real Stockfish binary. Skipped when
+  none is installed.
 """
 
 import os
+import shutil
 from collections.abc import Callable
 
 import pytest
@@ -39,3 +42,14 @@ def test_database_url() -> str:
             pytest.fail("CHESS_TEST_DATABASE_URL must be set in CI")
         pytest.skip("CHESS_TEST_DATABASE_URL not set; start Postgres to run integration tests")
     return url
+
+
+@pytest.fixture(scope="session")
+def stockfish_path() -> str:
+    """A Stockfish binary: CHESS_TEST_ENGINE_PATH, else `stockfish` on PATH."""
+    path = os.environ.get("CHESS_TEST_ENGINE_PATH") or shutil.which("stockfish")
+    if not path:
+        if os.environ.get("CI"):  # same rule as the database: never a silent skip in CI
+            pytest.fail("Stockfish must be installed in CI (scripts/install-stockfish.sh)")
+        pytest.skip("Stockfish not found; `brew install stockfish` to run engine tests")
+    return path

@@ -675,3 +675,53 @@ stopped, which determines reliability when workers crash or are restarted.
 - (−) A job longer than the lease must keep heartbeating; a stalled heartbeat thread
   would let the job be recovered and run twice (handlers are idempotent, so this is safe).
 
+
+---
+
+## ADR-023: Stockfish distribution and engine adapter
+
+- **Status:** Accepted · **Date:** 2026-11-23
+
+### Context
+Analysis results depend on the exact engine build (ADR-004). The engine must be
+available to the worker container, to CI, and to developers, and the version that
+produced each result must be recorded.
+
+### Decision
+- **Pinned official release, verified by checksum.** `scripts/install-stockfish.sh`
+  downloads Stockfish 19's official universal Linux build (x86-64 or arm64) and rejects
+  it unless its SHA-256 matches the release's published digest. The Dockerfile runs it in
+  a separate `engine` build stage and copies only the binary into the runtime image; the
+  CI test job runs the same script (cached by the script's contents). Locally:
+  `brew install stockfish`.
+- **The engine's own identity is recorded**, read from its UCI `id name`
+  (`Stockfish 19` → `stockfish`, `19`), never from configuration, so a different local
+  build can't be mislabelled.
+- **Adapter:** python-chess's `chess.engine` (already a dependency) behind our `Engine`
+  protocol (`engine/base.py`). Scores are converted to White's point of view; a crashed
+  process becomes `EngineError`. `evaluate_game` sends `ucinewgame` (clears the hash) at
+  the start of every game, so a game's evaluations never depend on what was analysed
+  before it.
+- **Terminal positions are not searched:** checkmate is stored as mate 0 (the side to
+  move is mated), stalemate / insufficient material / 75-move / fivefold as 0 cp.
+  Claimable draws (threefold, 50-move) are searched normally.
+- **Defaults:** 300,000 nodes per position, 64 MB hash, 1 thread, MultiPV 1. Measured on
+  an Apple M-series core: ≈ 0.5M nodes/s, ≈ depth 18, ≈ 0.6 s per position, ≈ 40 s for an
+  average 65-ply game.
+- **Tests:** unit tests use a scripted `FakeEngine`; `tests/engine` (marker `engine`)
+  runs the real binary, skipped locally if none is installed, required in CI.
+
+### Alternatives
+- **Debian's `stockfish` package:** older, and the version changes with the base image.
+- **Compiling from source in Docker:** fully controllable, but slower builds and more
+  moving parts, unnecessary now that official Linux arm64 builds exist.
+- **Time-limited search:** see ADR-004 (not reproducible).
+
+### Consequences
+- (+) Docker, CI and (via Homebrew) local development run the same engine version, and
+  every result names the engine that produced it.
+- (+) The downloaded binary is verified before use.
+- (−) The runtime image grows by ~100 MB (the binary embeds its neural network).
+- (−) A Homebrew upgrade can move local development to a newer version than Docker; this
+  is visible (different `engine_version`, hence a different analysis config), not silent.
+- (−) Upgrading Stockfish means updating the version and both checksums in one script.
