@@ -81,6 +81,7 @@ class FakeEngine:
     analysed: list[chess.Board] = field(default_factory=list)  # copies, with move stacks
     new_games: int = 0
     fail_after: int | None = None  # raise EngineError after this many analyse calls
+    closed: bool = False
 
     def new_game(self) -> None:
         self.new_games += 1
@@ -94,3 +95,6 @@ class FakeEngine:
         return EngineResult(
             score=self.score_fn(board), best_move_uci=best, pv_uci=(best,), depth=1, nodes=1
         )
+
+    def close(self) -> None:
+        self.closed = True

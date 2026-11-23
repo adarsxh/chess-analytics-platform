@@ -56,7 +56,7 @@ class Job(IdMixin, TimestampsMixin, Base):
     run_after: Mapped[datetime] = mapped_column(server_default=func.now())  # retry backoff
     locked_by: Mapped[str | None]  # worker identity holding the lease
     locked_until: Mapped[datetime | None]  # lease expiry; extended by heartbeats
-    dedup_key: Mapped[str | None]  # e.g. "sync:chesscom:42", "analyse:1001:3"
+    dedup_key: Mapped[str | None]  # e.g. "sync:chesscom:someone", "analyse:1001"
     last_error: Mapped[str | None]
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]

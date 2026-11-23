@@ -14,6 +14,8 @@ from chess_analytics.services.analyse import (
     Outcome,
     analyse_game,
     latest_games_needing_analysis,
+    queue_latest_for_analysis,
+    request_analysis,
 )
 from chess_analytics.storage.models.analysis import (
     AnalysisConfig,
@@ -22,22 +24,14 @@ from chess_analytics.storage.models.analysis import (
     PositionEvaluation,
 )
 from chess_analytics.storage.models.core import Game
+from chess_analytics.storage.models.ops import Job
 from chess_analytics.storage.repositories.core import CoreRepository
+from chess_analytics.storage.repositories.queries import GameQueries
 from tests.fakes import FakeEngine
 
-from .factories import make_parsed_game, make_raw_game, parsed_moves
+from .factories import make_parsed_game, make_raw_game, parsed_moves, store_game
 
 pytestmark = pytest.mark.integration
-
-# 1.f3 e5 2.g4 Qh4#: four moves, the last one mates.
-FOOLS_MATE = parsed_moves(("f3", "f2f3"), ("e5", "e7e5"), ("g4", "g2g4"), ("Qh4#", "d8h4"))
-
-
-def store_game(session_factory: sessionmaker[Session], **overrides) -> int:
-    with session_factory.begin() as session:
-        raw = make_raw_game(session)
-        parsed = make_parsed_game(moves=FOOLS_MATE, **overrides)
-        return CoreRepository(session).save_game(parsed, raw_game_id=raw.id, parser_version=1)
 
 
 def count(session_factory: sessionmaker[Session], model, *where) -> int:
@@ -219,3 +213,54 @@ def test_stale_and_failed_analyses_still_need_analysis(session_factory) -> None:
     )  # fmt: skip
 
     assert needing == [failed, stale]
+
+
+# --------------------------------------------------------------- queueing ---
+
+
+def queued_jobs(session_factory) -> list[tuple[int, int]]:
+    """(game_id, priority) of every analyse_game job, by game id."""
+    with session_factory() as session:
+        jobs = session.scalars(select(Job).where(Job.job_type == "analyse_game")).all()
+        return sorted((job.payload["game_id"], job.priority) for job in jobs)
+
+
+def test_request_analysis_queues_one_job_per_game(session_factory, game_id: int) -> None:
+    job_id, created = request_analysis(session_factory, game_id)
+    again, created_again = request_analysis(session_factory, game_id)
+
+    assert created and not created_again and again == job_id
+    assert queued_jobs(session_factory) == [(game_id, 100)]
+    with session_factory() as session:
+        assert session.get(Job, job_id).dedup_key == f"analyse:{game_id}"
+
+
+def test_request_analysis_of_an_unknown_game(session_factory) -> None:
+    with pytest.raises(GameNotFoundError):
+        request_analysis(session_factory, 999_999_999)
+    assert queued_jobs(session_factory) == []
+
+
+def test_auto_analysis_covers_only_the_newest_games(session_factory) -> None:
+    base = datetime(2026, 10, 1, tzinfo=UTC)
+    ids = [store_game(session_factory, end_time=base + timedelta(days=d)) for d in range(4)]
+    engine = FakeEngine()
+    analyse_game(ids[3], engine=engine, session_factory=session_factory)  # the newest one
+    with session_factory() as session:
+        player_id = GameQueries(session).find_player(platform="chesscom", username="WhitePlayer").id
+
+    def auto(latest: int) -> list[int]:
+        return queue_latest_for_analysis(
+            player_id, latest=latest, engine=engine, session_factory=session_factory
+        )
+
+    # Window = the 2 newest games; the newest is analysed, so only one is queued. Older
+    # games are not pulled in to fill the window: they stay on-demand (ADR-004).
+    assert auto(2) == [ids[2]]
+    assert queued_jobs(session_factory) == [(ids[2], 200)]
+    assert auto(2) == [ids[2]]  # repeating the sync queues no duplicates
+    assert queued_jobs(session_factory) == [(ids[2], 200)]
+    assert auto(0) == []
+
+    request_analysis(session_factory, ids[2])  # someone opens that game: moved ahead
+    assert queued_jobs(session_factory) == [(ids[2], 100)]

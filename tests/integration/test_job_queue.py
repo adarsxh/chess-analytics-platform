@@ -46,6 +46,23 @@ def test_enqueue_returns_the_active_job_instead_of_a_duplicate(jobs: JobReposito
     assert again.id == first.id
 
 
+def test_a_duplicate_request_raises_the_priority_of_a_queued_job(
+    session: Session, jobs: JobRepository
+) -> None:
+    background, _ = jobs.enqueue("analyse_game", {"game_id": 1}, dedup_key="a:1", priority=200)
+    jobs.enqueue("analyse_game", {"game_id": 1}, dedup_key="a:1", priority=100)
+    assert reload(session, background.id).priority == 100
+    jobs.enqueue("analyse_game", {"game_id": 1}, dedup_key="a:1", priority=200)
+    assert reload(session, background.id).priority == 100  # never lowered
+
+
+def test_a_running_job_keeps_its_priority(session: Session, jobs: JobRepository) -> None:
+    job, _ = jobs.enqueue("analyse_game", {"game_id": 1}, dedup_key="a:1", priority=200)
+    jobs.claim("w1", lease=LEASE)
+    again, created = jobs.enqueue("analyse_game", {"game_id": 1}, dedup_key="a:1", priority=100)
+    assert (again.id, created, reload(session, job.id).priority) == (job.id, False, 200)
+
+
 def test_finished_job_does_not_block_new_work(session: Session, jobs: JobRepository) -> None:
     first, _ = jobs.enqueue("sync_player", SYNC, dedup_key="k")
     claimed = jobs.claim("w1", lease=LEASE)

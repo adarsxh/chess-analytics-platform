@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     engine_path: str = "stockfish"  # a command on PATH, or an absolute path
     engine_nodes_per_position: int = Field(default=300_000, gt=0)
     engine_hash_mb: int = Field(default=64, ge=1)
+    # After each successful sync, the worker queues analysis of the player's N newest games
+    # that aren't analysed yet, as background work (ADR-004). 0 turns this off.
+    auto_analyse_latest_n: int = Field(default=20, ge=0)
 
     @field_validator("log_level", mode="before")
     @classmethod

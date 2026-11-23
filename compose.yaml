@@ -59,8 +59,8 @@ services:
       start_period: 5s
 
   worker:
-    # Runs queued jobs (syncs now, engine analysis in Phase 6). Scale with
-    # `docker compose up --scale worker=3`: SKIP LOCKED keeps workers from colliding.
+    # Runs queued jobs: syncs and Stockfish analyses. One analysis uses one CPU core, so
+    # scale with `docker compose up --scale worker=4`: SKIP LOCKED keeps workers apart.
     build: .
     image: ${CHESS_IMAGE:-chess-analytics:local}  # CI sets CHESS_IMAGE to its built image
     command: ["python", "-m", "chess_analytics.worker"]
@@ -72,7 +72,7 @@ services:
       migrate:
         condition: service_completed_successfully
     # `docker stop` sends SIGTERM, then SIGKILL after this grace period. A sync takes
-    # ~25 s, so give the current job time to finish instead of being killed mid-way.
+    # ~25 s and an analysis ~40 s, so the current job can finish instead of being killed.
     stop_grace_period: 60s
     restart: unless-stopped
 

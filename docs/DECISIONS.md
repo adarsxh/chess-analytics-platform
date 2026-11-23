@@ -769,3 +769,61 @@ deferred in Phase 2 (ADR-017 made classifications versioned and re-derivable).
 - (+) Thresholds can be tuned later without re-running Stockfish.
 - (−) The curve is not rating-aware: a 10 % drop is judged the same at 800 and at 2400.
 - (−) With MultiPV 1 a non-engine move that is equally good is `excellent`, not `best`.
+
+
+---
+
+## ADR-025: Analysis jobs and the analysis API
+
+- **Status:** Accepted · **Date:** 2026-11-23
+
+### Context
+Analysis (ADR-023, ADR-024) runs ≈ 40 s per game, so it belongs in the worker (ADR-022).
+ADR-004 asks for the latest 20 games to be analysed after each sync and every other game
+on demand. An analysis config includes the engine's exact version, which only a running
+engine reports.
+
+### Decision
+- **One `analyse_game` job per game**, payload `{"game_id": N}`, `dedup_key`
+  `analyse:<game_id>`. The job names no config: the worker that runs it analyses with
+  its own engine and settings, so the API never needs to know the engine version.
+- **Priorities** (lower runs first): syncs and on-demand analyses `100`, auto-analysis
+  `200`. Re-requesting a job that is still queued at a lower priority moves it up (one
+  conditional `UPDATE`, so a job being claimed at that moment is never changed).
+- **Auto-analysis** happens in the sync handler, after a successful sync: of the
+  player's 20 newest games (`CHESS_AUTO_ANALYSE_LATEST_N`), those without a fresh,
+  successful analysis by the worker's config are queued. It is a fixed *window*: older
+  games are not pulled in to fill it, so a sync never queues more than 20 analyses and
+  the history is never backfilled by accident. If the engine cannot start, the sync
+  still succeeds and the skip is logged.
+- **Failures:** unknown game or malformed payload → permanent; engine failure →
+  retryable, and the worker's engine process is discarded so the retry starts a new one.
+- **One engine process per worker**, started on the first analysis and reused (its hash
+  is cleared per game, ADR-023), closed when the worker stops.
+- **API:** `POST /api/v1/games/{id}/analysis` → `202` + job. `GET …/analysis` returns
+  the game's most useful analysis: a fresh, successful one if any, else the most
+  recently updated (so a running or failed one is visible). Evaluations and labels are
+  returned only when it succeeded; labels come from the newest classifier version stored.
+  `404` for an unknown game and for a game never analysed.
+- **End-to-end:** the CI e2e stack analyses the synced stub games with the real Stockfish
+  from the image (20k nodes for speed). The e2e stack is its own compose project
+  (`chess-analytics-e2e`, API on 18000, no host database port), so it can never attach
+  to, or `down -v`, the development database.
+
+### Alternatives
+- **Dedup per (game, config):** precise, but the API would have to know the engine
+  version; with one engine build per deployment it adds nothing.
+- **"20 newest *unanalysed* games" instead of a window:** each sync would reach further
+  back, quietly analysing the whole history (≈ 13 min per 20 games per worker).
+- **Queueing auto-analysis from the API or in `sync_player`:** the API has no engine, and
+  the sync service would gain an engine dependency it doesn't need.
+- **A new engine process per job:** simpler, but ~0.5 s start-up per game and no reuse.
+
+### Consequences
+- (+) Duplicate requests never run an analysis twice; opening a game moves it ahead.
+- (+) The cost of a sync is bounded: at most 20 analyses, all behind interactive work.
+- (+) Scaling analysis is `--scale worker=N` (one core each).
+- (−) Workers with different engine builds would analyse with different configs; both
+  results are kept (ADR-017), and `GET` prefers the fresh one.
+- (−) A game outside the latest 20 has no analysis until someone requests it; analytics
+  must state coverage (ADR-004).

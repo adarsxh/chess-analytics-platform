@@ -1,7 +1,10 @@
 """Static checks on table definitions (no database needed)."""
 
+from typing import get_args
+
 from sqlalchemy import BigInteger, DateTime, String
 
+from chess_analytics.api.schemas import MoveLabel
 from chess_analytics.classification.moves import Label
 from chess_analytics.storage.models import metadata
 from chess_analytics.storage.models.analysis import MOVE_LABELS
@@ -43,3 +46,8 @@ def test_database_labels_match_the_classifier() -> None:
     # Storage doesn't import the classifier (dependency rule), so the allowed values are
     # written twice; this keeps them equal. Migration 0004 holds a frozen copy.
     assert set(MOVE_LABELS) == {label.value for label in Label}
+
+
+def test_api_labels_match_the_classifier() -> None:
+    # The API contract lists the labels explicitly, so clients see them in the OpenAPI schema.
+    assert set(get_args(MoveLabel)) == {label.value for label in Label}

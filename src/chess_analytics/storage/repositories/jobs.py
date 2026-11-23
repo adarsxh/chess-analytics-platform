@@ -26,6 +26,11 @@ from chess_analytics.storage.models.ops import ACTIVE_JOB_STATUSES, Job
 
 RETRY_BASE_SECONDS = 30  # retry delays: 30 s, 2 min, 8 min, ... (x4 per attempt)
 
+# Lower runs first. Work someone is waiting for (a sync, analysing one game) goes ahead
+# of background work (auto-analysis after a sync).
+PRIORITY_ON_DEMAND = 100
+PRIORITY_BACKGROUND = 200
+
 
 def retry_delay(attempt: int) -> timedelta:
     """Backoff before the next attempt, after `attempt` attempts have failed."""
@@ -47,11 +52,13 @@ class JobRepository:
         payload: dict[str, Any],
         *,
         dedup_key: str | None = None,
-        priority: int = 100,
+        priority: int = PRIORITY_ON_DEMAND,
         max_attempts: int = 3,
     ) -> tuple[Job, bool]:
         """Queue a job. Returns (job, created). With a dedup_key, an already queued or
-        running job for the same key is returned instead of creating a duplicate."""
+        running job for the same key is returned instead of creating a duplicate; if it
+        is still queued at a lower priority, it is moved up to the requested one (someone
+        is now waiting for background work)."""
         statement = (
             insert(Job)
             .values(
@@ -78,6 +85,16 @@ class JobRepository:
         if existing is None:  # it finished between our INSERT and SELECT: try once more
             return self.enqueue(job_type, payload, dedup_key=dedup_key, priority=priority,
                                 max_attempts=max_attempts)  # fmt: skip
+        # In SQL, not on the loaded object: a worker may claim the job at any moment, and
+        # only a job that is still queued (and lower priority) may be moved up.
+        moved_up = self._session.execute(
+            update(Job)
+            .where(Job.id == existing.id, Job.status == "queued", Job.priority > priority)
+            .values(priority=priority, updated_at=func.now())
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if moved_up:
+            self._session.refresh(existing)
         return existing, False
 
     # ------------------------------------------------------------------ claim ---

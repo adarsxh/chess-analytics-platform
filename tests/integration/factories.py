@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from chess_analytics.domain.game import (
     Color,
@@ -25,6 +25,7 @@ from chess_analytics.domain.game import (
 from chess_analytics.storage.models.analysis import AnalysisConfig, GameAnalysis
 from chess_analytics.storage.models.core import Game, Player
 from chess_analytics.storage.models.raw import ArchiveFetch, IngestionRun, RawGame
+from chess_analytics.storage.repositories.core import CoreRepository
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
@@ -160,6 +161,18 @@ def make_parsed_game(**overrides: Any) -> ParsedGame:
         ),  # fmt: skip
     }
     return ParsedGame(**(values | overrides))
+
+
+# 1.f3 e5 2.g4 Qh4#: four moves, the last one mates.
+FOOLS_MATE = parsed_moves(("f3", "f2f3"), ("e5", "e7e5"), ("g4", "g2g4"), ("Qh4#", "d8h4"))
+
+
+def store_game(session_factory: sessionmaker[Session], **overrides: Any) -> int:
+    """Store a processed game (fool's mate unless `moves` is given) and return its id."""
+    with session_factory.begin() as session:
+        raw = make_raw_game(session)
+        parsed = make_parsed_game(**({"moves": FOOLS_MATE} | overrides))
+        return CoreRepository(session).save_game(parsed, raw_game_id=raw.id, parser_version=1)
 
 
 @contextmanager

@@ -57,6 +57,12 @@ class SyncRequestedResponse(JobResponse):
     created: bool = Field(description="False if an identical sync was already queued or running")
 
 
+class AnalysisRequestedResponse(JobResponse):
+    created: bool = Field(
+        description="False if an analysis of this game was already queued or running"
+    )
+
+
 # ---------------------------------------------------------------- players ---
 
 
@@ -146,3 +152,52 @@ class GameDetail(BaseModel):
     white: Side
     black: Side
     moves: list[Move]
+
+
+# --------------------------------------------------------------- analysis ---
+
+MoveLabel = Literal["forced", "best", "excellent", "good", "inaccuracy", "mistake", "blunder"]
+
+
+class EngineConfig(BaseModel):
+    name: str
+    version: str
+    nodes_per_position: int
+    threads: int
+    hash_mb: int
+    multipv: int
+
+
+class EvaluatedPosition(BaseModel):
+    """The engine's view of the position after `ply` moves (0 = the start position)."""
+
+    ply: int
+    score_cp: int | None = Field(description="White's point of view; null when mate_in is set")
+    mate_in: int | None = Field(
+        description="Moves to mate, + for White, − for Black; 0 = the side to move is mated"
+    )
+    best_move_uci: str | None = Field(description="Null when the game is over")
+    pv_uci: list[str]
+    depth: int
+
+
+class ClassifiedMove(BaseModel):
+    ply: int
+    san: str
+    uci: str
+    label: MoveLabel
+    win_loss: Decimal = Field(description="The mover's win-% loss, 0–100 (ADR-024)")
+
+
+class GameAnalysisResponse(BaseModel):
+    game_id: int
+    analysis_id: int
+    status: Literal["pending", "running", "succeeded", "failed"]
+    fresh: bool = Field(description="False if the game's moves changed after this analysis")
+    error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    engine: EngineConfig
+    classifier_version: int | None
+    positions: list[EvaluatedPosition] = Field(description="Empty unless status is succeeded")
+    moves: list[ClassifiedMove] = Field(description="Empty unless status is succeeded")

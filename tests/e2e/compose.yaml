@@ -6,8 +6,21 @@
 #   docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example down -v
 #
 # Paths are relative to the repository root (the directory of the first compose file).
+#
+# Isolated from the development stack, so both can run at once and `down -v` can never
+# delete development data: its own project name (hence its own containers, network and
+# database volume), no host port for its database, and the API on port 18000.
+
+name: chess-analytics-e2e
 
 services:
+  db:
+    ports: !reset []  # only the stack's own containers talk to this database
+
+  api:
+    ports: !override
+      - "127.0.0.1:18000:8000"
+
   chesscom-stub:
     image: python:3.13-slim
     command: ["python", "/stub/stub_chesscom.py"]
@@ -23,6 +36,8 @@ services:
     environment:
       CHESS_CHESSCOM_BASE_URL: http://chesscom-stub:8080/pub
       CHESS_WORKER_POLL_INTERVAL_SECONDS: "0.5"
+      # The real Stockfish from the image, with a small search so the test stays fast.
+      CHESS_ENGINE_NODES_PER_POSITION: "20000"
     depends_on:
       chesscom-stub:
         condition: service_healthy

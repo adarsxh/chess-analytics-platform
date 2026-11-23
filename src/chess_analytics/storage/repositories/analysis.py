@@ -85,10 +85,17 @@ class AnalysisRepository:
         ).all()
         return GameToAnalyse(game.id, game.initial_fen, tuple(moves), game.moves_hash)
 
+    def game_exists(self, game_id: int) -> bool:
+        return self._session.get(Game, game_id) is not None
+
     def latest_games_needing_analysis(
-        self, player_id: int, *, config_id: int, limit: int
+        self, player_id: int, *, config_id: int, limit: int, among_latest: int | None = None
     ) -> list[int]:
-        """The player's newest games without a fresh, successful analysis by this config."""
+        """The player's newest games without a fresh, successful analysis by this config.
+
+        With `among_latest=N`, only the player's N newest games are considered (the
+        auto-analysis window, ADR-004); without it, the search goes back through history.
+        """
         fresh = (
             select(GameAnalysis.id)
             .where(
@@ -99,15 +106,17 @@ class AnalysisRepository:
             )
             .exists()
         )
-        return list(
-            self._session.scalars(
-                select(Game.id)
-                .join(GamePlayer, GamePlayer.game_id == Game.id)
-                .where(GamePlayer.player_id == player_id, ~fresh)
-                .order_by(Game.end_time.desc(), Game.id.desc())
-                .limit(limit)
-            )
+        newest_first = (Game.end_time.desc(), Game.id.desc())
+        players_games = (
+            select(Game.id)
+            .join(GamePlayer, GamePlayer.game_id == Game.id)
+            .where(GamePlayer.player_id == player_id)
         )
+        query = players_games.where(~fresh)
+        if among_latest is not None:
+            window = players_games.order_by(*newest_first).limit(among_latest)
+            query = query.where(Game.id.in_(window))
+        return list(self._session.scalars(query.order_by(*newest_first).limit(limit)))
 
     # -------------------------------------------------------------- analyses ---
 
