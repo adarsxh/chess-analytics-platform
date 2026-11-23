@@ -827,3 +827,53 @@ engine reports.
   results are kept (ADR-017), and `GET` prefers the fresh one.
 - (−) A game outside the latest 20 has no analysis until someone requests it; analytics
   must state coverage (ADR-004).
+
+---
+
+## ADR-026: Player analytics: accuracy, opening families, coverage
+
+- **Status:** Accepted · **Date:** 2026-11-23
+
+### Context
+Phase 7 turns stored games and analyses into statistics: results, rating history,
+openings, accuracy and errors (the README's V1 set). ADR-008 puts analytics SQL in
+`analytics/`; ADR-004 requires analysis-based numbers to state their coverage.
+
+### Decision
+- **Computed at read time** with PostgreSQL (`analytics/queries.py`): nothing is stored,
+  so a new classifier or analysis is reflected immediately. Every query takes the same
+  filters: time class and an inclusive UTC date range.
+- **Accuracy %.** Move accuracy = `103.1668 · e^(−0.04354 · loss) − 3.1669`, clamped to
+  0–100 (Lichess's published curve), on the stored win-% loss (ADR-024). Game accuracy =
+  **(arithmetic mean + harmonic mean) / 2** over the player's moves, forced moves
+  excluded; in the harmonic mean a move counts as at least 1. Overall accuracy is the
+  mean of game accuracies (each game counts once).
+- **Which analysis counts:** per game, the fresh successful one (ADR-017), the newest
+  engine config if several, labelled by the newest classifier version stored for it.
+- **Coverage** (analysed games / games matching the filters) is returned with every
+  accuracy and error statistic.
+- **Opening families.** Chess.com's names are per variation (660 names over 2,400 games).
+  The family is the name up to its first `Opening/Defense/Defence/Game/Gambit/Attack/System`
+  word (52 families); grouping by full name is also available.
+- **Rating history:** one point per time class and UTC day (the rating after the last
+  rated game that day).
+
+### Alternatives
+- **Plain mean of move accuracies:** simplest, but generous: on the 3 games where
+  Chess.com also reports accuracy, it read 16–20 points higher (mean+harmonic: 6–13).
+- **Harmonic mean only:** dominated by the single worst move.
+- **Lichess's exact method** (adds weights by position volatility): closer still, but
+  needs sliding windows over evaluations; not worth it before we compare more games.
+- **Precomputed statistics tables:** faster reads, but must be invalidated on every new
+  analysis or classifier version; unnecessary at this data size (milliseconds per query).
+- **ECO codes for openings:** only 113 codes, but a code covers unrelated names and is
+  less readable; it is shown alongside instead (most common code in the group).
+
+### Consequences
+- (+) Statistics are always consistent with the latest data; no refresh jobs.
+- (+) Accuracy reacts to blunders without one move ruining a game.
+- (−) Our accuracy is not Chess.com's (their formula is private) and will differ.
+- (−) Opening families depend on Chess.com's naming; a proper classification from the
+  moves (planned for V2) would work across platforms.
+- (−) Queries scan the player's games on each request; fine for thousands of games, to be
+  revisited (materialised views) if needed.
