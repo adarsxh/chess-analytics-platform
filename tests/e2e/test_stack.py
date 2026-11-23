@@ -16,6 +16,7 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 API = os.environ.get("CHESS_E2E_API_URL", "http://127.0.0.1:18000")  # tests/e2e/compose.yaml
+DASHBOARD = os.environ.get("CHESS_E2E_DASHBOARD_URL", "http://127.0.0.1:18501")
 PLAYER = "e2e_player"  # served by tests/e2e/stub_chesscom.py
 JOB_TIMEOUT_SECONDS = 60
 
@@ -97,3 +98,9 @@ def test_unknown_player_fails_permanently_without_retries(api: httpx2.Client) ->
     job = wait_for_job(api, request_sync(api, "no_such_player"))
     assert (job["status"], job["attempts"]) == ("failed", 1)
     assert "PermanentJobError: player not found" in job["last_error"]
+
+
+def test_the_dashboard_is_up() -> None:
+    # Its behaviour is tested with AppTest in frontend/tests; here: the image starts and serves.
+    response = httpx2.get(f"{DASHBOARD}/_stcore/health", timeout=10)
+    assert (response.status_code, response.text) == (200, "ok")

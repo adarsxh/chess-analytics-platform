@@ -107,8 +107,8 @@ only in that platform's adapter. Adding a new platform means adding
 8. Analytics endpoints compute statistics with SQL at read time.
 9. Client polls `GET /api/v1/jobs/{job_id}` and reads games through the API.
 
-Steps 1–7 and 9 are implemented and tested end to end in CI, including a real Stockfish
-analysis (Phases 5–6); step 8 arrives with Phase 7 (analytics and dashboard).
+All steps are implemented and tested end to end in CI, including a real Stockfish
+analysis and the dashboard rendering the API's real responses (Phases 5–7).
 
 Each of steps 3–4, 5 and 7 can be **re-run on its own**: re-parse without re-fetching,
 or re-analyse with a new engine version without re-fetching or re-parsing.

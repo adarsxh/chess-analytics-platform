@@ -11,3 +11,5 @@
 tests
 docs
 data
+# The dashboard is its own image, built from frontend/ (ADR-027).
+frontend

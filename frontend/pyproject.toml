@@ -1,0 +1,29 @@
+# The Streamlit dashboard: a separate project (ADR-005, ADR-027). It talks to the backend
+# only over HTTP and cannot import `chess_analytics`, which isn't one of its dependencies.
+[project]
+name = "chess-analytics-dashboard"
+version = "0.1.0"
+description = "Streamlit dashboard for the Chess Analytics API."
+requires-python = ">=3.13"
+dependencies = [
+    "altair>=6.3.0",
+    "httpx2>=2.16.2",
+    "pandas>=3.1.1",
+    "streamlit>=1.67.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.uv]
+package = false  # an application run with `streamlit run`, not an installable library
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]  # so tests (and AppTest) import `dashboard` like `streamlit run` does
+# e2e: renders the pages against the running e2e stack's real API (CI starts it), so the
+# fake API in test_app.py can't silently drift from the real responses.
+addopts = "-ra --strict-markers -m 'not e2e'"
+markers = ["e2e: needs the docker compose e2e stack (CHESS_E2E_API_URL)"]

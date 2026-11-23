@@ -84,6 +84,9 @@ jobs:
         run: scripts/install-stockfish.sh "$CHESS_TEST_ENGINE_PATH"
       - name: Unit + integration tests
         run: uv run pytest -v
+      - name: Dashboard tests (frontend/ is its own project with its own lock file)
+        working-directory: frontend
+        run: uv sync --locked && uv run pytest -v
       # The same commands a deployment would run, against the service database.
       - name: Apply migrations
         run: uv run alembic upgrade head
@@ -112,8 +115,17 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Smoke test the image
         run: docker run --rm chess-analytics-api:ci python -c "import chess_analytics; print(chess_analytics.__version__)"
+      - name: Build dashboard image (not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: false
+          load: true
+          tags: chess-analytics-dashboard:ci
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
 
-      # End-to-end: the real stack (db → migrate → api + worker) built from the image above,
+      # End-to-end: the real stack (db → migrate → api + worker + dashboard) from the images above,
       # with Chess.com replaced by a local stub (CI never calls the real API). The tests
       # drive it over HTTP: request a sync, wait for the worker, read the games back.
       - uses: astral-sh/setup-uv@v10.3.3
@@ -124,9 +136,13 @@ jobs:
       - name: Start the e2e stack
         env:
           CHESS_IMAGE: chess-analytics-api:ci
+          CHESS_DASHBOARD_IMAGE: chess-analytics-dashboard:ci
         run: docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example up -d --no-build --wait
       - name: Run end-to-end tests
         run: uv run pytest -m e2e -v
+      - name: Run dashboard end-to-end tests (pages against the real API)
+        working-directory: frontend
+        run: uv sync --locked && uv run pytest -m e2e -v
       - name: Show stack logs on failure
         if: failure()
         run: docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example logs --no-color
