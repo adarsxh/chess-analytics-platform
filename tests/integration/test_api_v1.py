@@ -287,6 +287,79 @@ def test_a_fresh_analysis_is_preferred_over_a_newer_failed_one(
     assert (body["analysis_id"], body["status"]) == (good.analysis_id, "succeeded")
 
 
+# ------------------------------------------------------------------ stats ---
+
+
+def test_stats_overview(client: TestClient, session_factory) -> None:
+    add_game(session_factory, minutes_ago=1)
+    add_game(session_factory, minutes_ago=2, me_white=False)
+    add_game(session_factory, minutes_ago=3, time_class=TimeClass.BLITZ)
+
+    body = client.get("/api/v1/players/adarsxh1/stats/overview").json()
+    rapid = client.get("/api/v1/players/adarsxh1/stats/overview?time_class=rapid").json()
+
+    assert body["total"] == {"games": 3, "wins": 2, "draws": 0, "losses": 1,
+                             "score_percent": "66.7"}  # fmt: skip
+    assert set(body["by_time_class"]) == {"rapid", "blitz"}
+    assert (body["by_color"]["white"]["games"], body["by_color"]["black"]["games"]) == (2, 1)
+    assert rapid["total"]["games"] == 2
+
+
+def test_stats_date_filters(client: TestClient, session_factory) -> None:
+    add_game(session_factory, minutes_ago=60 * 24 * 3)  # 2026-10-29
+    add_game(session_factory, minutes_ago=1)  # 2026-10-31
+
+    def games(query: str) -> int:
+        url = f"/api/v1/players/adarsxh1/stats/overview?{query}"
+        return client.get(url).json()["total"]["games"]
+
+    assert games("since=2026-10-30") == 1
+    assert games("until=2026-10-29") == 1
+    assert games("since=2026-10-29&until=2026-10-31") == 2
+
+
+@pytest.mark.parametrize(
+    "query", ["since=2026-11-02&until=2026-11-01", "time_class=classical", "since=yesterday"]
+)
+def test_invalid_stats_filters_are_422(client: TestClient, session_factory, query) -> None:
+    add_game(session_factory, minutes_ago=1)
+    assert client.get(f"/api/v1/players/adarsxh1/stats/overview?{query}").status_code == 422
+
+
+@pytest.mark.parametrize("view", ["overview", "rating-history", "openings", "accuracy"])
+def test_stats_of_an_unknown_player_are_404(client: TestClient, view: str) -> None:
+    assert client.get(f"/api/v1/players/nobody_here/stats/{view}").status_code == 404
+
+
+def test_stats_rating_history_and_openings(client: TestClient, session_factory) -> None:
+    add_game(session_factory, minutes_ago=1, source_opening_name="Scotch Game 3...d6")
+    add_game(session_factory, minutes_ago=2, source_opening_name="Scotch Game")
+
+    history = client.get("/api/v1/players/adarsxh1/stats/rating-history").json()
+    families = client.get("/api/v1/players/adarsxh1/stats/openings").json()
+    names = client.get("/api/v1/players/adarsxh1/stats/openings?group_by=name&limit=1").json()
+
+    assert history == [{"time_class": "rapid", "day": "2026-10-31", "rating": 1500, "games": 2}]
+    assert [(o["opening"], o["color"], o["games"]) for o in families] == [
+        ("Scotch Game", "white", 2)
+    ]
+    assert len(names) == 1
+
+
+def test_stats_accuracy_with_coverage(client: TestClient, session_factory) -> None:
+    analysed = add_game(session_factory, minutes_ago=1)
+    add_game(session_factory, minutes_ago=2)
+    analyse_game(analysed, engine=FakeEngine(), session_factory=session_factory)
+
+    body = client.get("/api/v1/players/adarsxh1/stats/accuracy").json()
+
+    assert body["coverage"] == {"analysed_games": 1, "total_games": 2, "percent": "50.0"}
+    (game,) = body["games"]
+    assert (game["game_id"], game["color"], game["moves"]) == (analysed, "white", 1)
+    assert 0 <= float(game["accuracy"]) <= 100
+    assert body["summary"]["accuracy"] == game["accuracy"]
+
+
 def test_business_endpoints_are_versioned_health_is_not(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
     assert "/health" in paths
