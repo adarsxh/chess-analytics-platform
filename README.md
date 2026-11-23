@@ -6,7 +6,9 @@ Analyse your online chess games: ingest game history from Chess.com, run Stockfi
 analysis, and explore results (win/loss/draw, rating progression, openings,
 blunders and mistakes) through an API and a dashboard.
 
-> **Status:** V1 in progress. Phase 1 (repository, environment and CI) is complete.
+> **Status:** V1 in progress. Done: Chess.com ingestion, processing into a clean model,
+> background jobs and the HTTP API, Stockfish analysis with move classification
+> (Phases 1–6). Next: analytics and the dashboard (Phase 7).
 
 ## Architecture at a glance
 

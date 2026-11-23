@@ -201,7 +201,7 @@ PK `(raw_game_id, parser_version)`.
 | Column | Type | Notes |
 |---|---|---|
 | id | bigint PK | |
-| engine_name, engine_version | text | e.g. `stockfish`, `17.1` |
+| engine_name, engine_version | text | e.g. `stockfish`, `19`, as reported by the engine (ADR-023) |
 | nodes_per_position | bigint | Node limit (ADR-004) |
 | threads | smallint | 1 for reproducibility |
 | hash_mb | integer | |
@@ -217,7 +217,7 @@ PK `(raw_game_id, parser_version)`.
 | game_id | bigint FK → core.games (RESTRICT) | |
 | analysis_config_id | bigint FK → analysis.analysis_configs | |
 | moves_hash | text | Copied from `games` at analysis time; mismatch = stale |
-| status | text | `pending` \| `running` \| `succeeded` \| `failed` |
+| status | text | `pending` \| `running` \| `succeeded` \| `failed` (V1 creates rows as `running`; `pending` is unused) |
 | started_at, finished_at | timestamptz, nullable | |
 | error | text, nullable | |
 | created_at, updated_at | timestamptz | |
@@ -278,6 +278,10 @@ the label CHECK was added in migration 0004.
 Partial `UNIQUE (dedup_key) WHERE status IN ('queued','running')`; claim index
 `(priority, run_after) WHERE status = 'queued'`; lease-recovery index `(locked_until) WHERE status = 'running'`;
 `CHECK (status <> 'running' OR locked_until IS NOT NULL)`: a running job always holds a lease.
+Enqueueing uses `INSERT … ON CONFLICT (dedup_key) WHERE status IN ('queued','running')`; the
+predicate must be **literal SQL**, never bind parameters. Once psycopg prepares the statement
+(after 5 runs), Postgres plans it generically and can no longer match a parameterised
+predicate to the partial index (found in the first real run: the 11th job failed).
 
 ## 5. Guarantees and what enforces them
 

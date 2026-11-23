@@ -41,7 +41,7 @@ class AnalysisConfig(IdMixin, CreatedAtMixin, Base):
     )
 
     engine_name: Mapped[str]  # e.g. "stockfish"
-    engine_version: Mapped[str]  # e.g. "17.1"
+    engine_version: Mapped[str]  # e.g. "19", as reported by the engine
     nodes_per_position: Mapped[int] = mapped_column(BigInteger)
     threads: Mapped[int] = mapped_column(SmallInteger)
     hash_mb: Mapped[int]

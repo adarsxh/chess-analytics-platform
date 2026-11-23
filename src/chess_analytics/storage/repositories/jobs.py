@@ -18,11 +18,11 @@ Concurrency rules, enforced in SQL rather than in Python:
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from chess_analytics.storage.models.ops import ACTIVE_JOB_STATUSES, Job
+from chess_analytics.storage.models.ops import ACTIVE_JOB_PREDICATE, ACTIVE_JOB_STATUSES, Job
 
 RETRY_BASE_SECONDS = 30  # retry delays: 30 s, 2 min, 8 min, ... (x4 per attempt)
 
@@ -69,9 +69,10 @@ class JobRepository:
                 max_attempts=max_attempts,
             )
             .on_conflict_do_nothing(
-                # Matches the partial unique index uq_jobs_dedup_key_active exactly.
+                # Matches the partial unique index uq_jobs_dedup_key_active exactly
+                # (literal SQL, not bind parameters: see ACTIVE_JOB_PREDICATE).
                 index_elements=["dedup_key"],
-                index_where=Job.status.in_(ACTIVE_JOB_STATUSES),
+                index_where=text(ACTIVE_JOB_PREDICATE),
             )
             .returning(Job.id)
         )
