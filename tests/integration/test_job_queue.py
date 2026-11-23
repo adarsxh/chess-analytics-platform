@@ -63,6 +63,14 @@ def test_a_running_job_keeps_its_priority(session: Session, jobs: JobRepository)
     assert (again.id, created, reload(session, job.id).priority) == (job.id, False, 200)
 
 
+def test_many_deduplicated_jobs_on_one_connection(jobs: JobRepository) -> None:
+    # Regression: psycopg prepares a statement after 5 runs and Postgres then switches to
+    # a generic plan. If the ON CONFLICT predicate used bind parameters, the generic plan
+    # could no longer match the partial unique index, and the ~11th enqueue failed.
+    for n in range(25):
+        assert jobs.enqueue("analyse_game", {"game_id": n}, dedup_key=f"analyse:{n}")[1]
+
+
 def test_finished_job_does_not_block_new_work(session: Session, jobs: JobRepository) -> None:
     first, _ = jobs.enqueue("sync_player", SYNC, dedup_key="k")
     claimed = jobs.claim("w1", lease=LEASE)

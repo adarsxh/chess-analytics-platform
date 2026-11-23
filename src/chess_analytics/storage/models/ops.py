@@ -14,6 +14,10 @@ from chess_analytics.storage.schema import OPS, Base, IdMixin, TimestampsMixin, 
 
 JOB_STATUSES = ("queued", "running", "succeeded", "failed")
 ACTIVE_JOB_STATUSES = ("queued", "running")
+# The dedup index's predicate, as literal SQL. ON CONFLICT must repeat it, and with bind
+# parameters instead of literals Postgres can't match it to the index once the statement
+# is prepared (psycopg prepares after 5 runs), so both use this exact text.
+ACTIVE_JOB_PREDICATE = "status IN ('queued', 'running')"
 
 
 class Job(IdMixin, TimestampsMixin, Base):
@@ -33,7 +37,7 @@ class Job(IdMixin, TimestampsMixin, Base):
             "uq_jobs_dedup_key_active",
             "dedup_key",
             unique=True,
-            postgresql_where=text("status IN ('queued', 'running')"),
+            postgresql_where=text(ACTIVE_JOB_PREDICATE),
         ),
         # Claiming: "next queued job by priority, whose run_after has passed".
         Index(
