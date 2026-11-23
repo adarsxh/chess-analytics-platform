@@ -127,8 +127,15 @@ versioned under `/api/v1`; `/health` and `/health/ready` are not.
 | GET | `/api/v1/players/{username}` | Profile and win/loss/draw record |
 | GET | `/api/v1/players/{username}/games` | Games, newest first: `limit`, `offset`, `time_class`, `outcome`, `rated` |
 | GET | `/api/v1/games/{game_id}` | One game with both sides and moves (`include_moves=false` to skip) |
+| GET | `/api/v1/players/{username}/stats/overview` | Wins / draws / losses: total, by time class, by colour |
+| GET | `/api/v1/players/{username}/stats/rating-history` | Rating after the last rated game of each day, per time class |
+| GET | `/api/v1/players/{username}/stats/openings` | Most played openings per colour (`group_by=family\|name`, `limit`) |
+| GET | `/api/v1/players/{username}/stats/accuracy` | Accuracy and errors per analysed game, with coverage |
 | POST | `/api/v1/games/{game_id}/analysis` | Queue a Stockfish analysis → `202` + job (duplicates return the same job) |
 | GET | `/api/v1/games/{game_id}/analysis` | Evaluation of every position and a label for every move (`404` until analysed) |
+
+All `stats` endpoints accept `time_class`, `since` and `until` (dates, inclusive, UTC).
+Accuracy is this project's own (ADR-026), so it differs from Chess.com's.
 
 ## Database migrations
 

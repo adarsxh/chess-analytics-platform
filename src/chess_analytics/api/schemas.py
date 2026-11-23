@@ -4,7 +4,7 @@ Kept separate from the database models on purpose: tables can change shape witho
 breaking clients, and nothing internal leaks out (e.g. lineage ids, worker names).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal, Self
 
@@ -201,3 +201,64 @@ class GameAnalysisResponse(BaseModel):
     classifier_version: int | None
     positions: list[EvaluatedPosition] = Field(description="Empty unless status is succeeded")
     moves: list[ClassifiedMove] = Field(description="Empty unless status is succeeded")
+
+
+# ------------------------------------------------------------------ stats ---
+
+
+class ResultRecord(Record):
+    score_percent: Decimal | None = Field(
+        description="Points per game in %: win 1, draw ½. Null without games"
+    )
+
+
+class OverviewStats(BaseModel):
+    total: ResultRecord
+    by_time_class: dict[TimeClass, ResultRecord]
+    by_color: dict[Literal["white", "black"], ResultRecord]
+
+
+class RatingPoint(BaseModel):
+    time_class: TimeClass
+    day: date
+    rating: int = Field(description="After the last rated game of the day")
+    games: int = Field(description="Rated games that day")
+
+
+class OpeningStats(ResultRecord):
+    opening: str = Field(description="Family (default) or full name, from Chess.com")
+    color: Literal["white", "black"]
+    eco: str | None = Field(description="Most common ECO code in the group")
+
+
+class Coverage(BaseModel):
+    analysed_games: int
+    total_games: int = Field(description="Games matching the filters")
+    percent: Decimal | None
+
+
+class QualitySummary(BaseModel):
+    accuracy: Decimal | None = Field(description="Mean of game accuracies (ADR-026)")
+    inaccuracies_per_game: Decimal | None
+    mistakes_per_game: Decimal | None
+    blunders_per_game: Decimal | None
+
+
+class GameQuality(BaseModel):
+    game_id: int
+    end_time: datetime
+    time_class: TimeClass
+    color: Literal["white", "black"]
+    outcome: Outcome
+    accuracy: Decimal | None = Field(description="Ours: (mean + harmonic mean) / 2 (ADR-026)")
+    source_accuracy: Decimal | None = Field(description="Chess.com's, when it provides one")
+    moves: int
+    inaccuracies: int
+    mistakes: int
+    blunders: int
+
+
+class AccuracyStats(BaseModel):
+    coverage: Coverage
+    summary: QualitySummary
+    games: list[GameQuality] = Field(description="Analysed games, newest first")

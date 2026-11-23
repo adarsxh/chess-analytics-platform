@@ -52,7 +52,7 @@ def get_player(
     username: Username, session: SessionDep, platform: PlatformParam = "chesscom"
 ) -> PlayerResponse:
     queries = GameQueries(session)
-    return PlayerResponse(**queries.player_summary(_player_or_404(queries, platform, username)))
+    return PlayerResponse(**queries.player_summary(player_or_404(queries, platform, username)))
 
 
 @router.get(
@@ -69,14 +69,14 @@ def list_player_games(
     rated: bool | None = None,
 ) -> GamePage:
     queries = GameQueries(session)
-    player = _player_or_404(queries, platform, username)
+    player = player_or_404(queries, platform, username)
     items, total = queries.list_player_games(
         player.id, limit=limit, offset=offset, time_class=time_class, outcome=outcome, rated=rated
     )
     return GamePage(items=items, total=total, limit=limit, offset=offset)
 
 
-def _player_or_404(queries: GameQueries, platform: str, username: str) -> Player:
+def player_or_404(queries: GameQueries, platform: str, username: str) -> Player:
     player = queries.find_player(platform=platform, username=username)
     if player is None:
         raise HTTPException(

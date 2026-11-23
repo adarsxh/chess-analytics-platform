@@ -12,7 +12,7 @@ import structlog
 from fastapi import FastAPI
 
 from chess_analytics import __version__
-from chess_analytics.api.routes import games, health, jobs, players
+from chess_analytics.api.routes import games, health, jobs, players, stats
 from chess_analytics.config import Settings, get_settings
 from chess_analytics.logging_setup import configure_logging
 from chess_analytics.storage.db import create_db_engine, create_session_factory
@@ -43,6 +43,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Chess Analytics API", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     app.include_router(health.router)  # unversioned: infrastructure checks, not clients
-    for router in (players.router, jobs.router, games.router):
+    for router in (players.router, stats.router, jobs.router, games.router):
         app.include_router(router, prefix=API_V1)  # decision Q1-a
     return app
