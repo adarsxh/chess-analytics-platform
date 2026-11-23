@@ -12,6 +12,10 @@
 Every step is idempotent: re-running a game produces the same rows, never duplicates.
 "Fresh" means the analysed moves_hash still equals the game's (ADR-017); if the game's
 moves change later, the next run re-analyses it in place.
+
+Queueing (ADR-025): `analyse_game` jobs carry only the game id, deduplicated per game.
+The engine config is chosen by the worker that runs the job, because only a running
+engine knows its exact version.
 """
 
 import time
@@ -29,9 +33,16 @@ from chess_analytics.storage.repositories.analysis import (
     ClassificationRow,
     GameToAnalyse,
 )
+from chess_analytics.storage.repositories.jobs import (
+    PRIORITY_BACKGROUND,
+    PRIORITY_ON_DEMAND,
+    JobRepository,
+)
 from chess_analytics.storage.repositories.queries import GameQueries
 
 log = structlog.get_logger(__name__)
+
+ANALYSE_JOB_TYPE = "analyse_game"
 
 
 class GameNotFoundError(Exception):
@@ -121,6 +132,47 @@ def latest_games_needing_analysis(
         repo = AnalysisRepository(session)
         config_id = repo.get_or_create_config(engine.identity, engine.settings).id
         return repo.latest_games_needing_analysis(player.id, config_id=config_id, limit=limit)
+
+
+def request_analysis(
+    session_factory: sessionmaker[Session], game_id: int, *, priority: int = PRIORITY_ON_DEMAND
+) -> tuple[int, bool]:
+    """Queue an analysis of one game. Returns (job_id, created).
+
+    Deduplicated per game: if one is already queued or running, that job is returned
+    (and, if it was queued as background work, moved up to `priority`).
+    """
+    with session_factory.begin() as session:
+        if not AnalysisRepository(session).game_exists(game_id):
+            raise GameNotFoundError(f"game {game_id} not found")
+        return _enqueue(JobRepository(session), game_id, priority)
+
+
+def queue_latest_for_analysis(
+    player_id: int, *, latest: int, engine: Engine, session_factory: sessionmaker[Session]
+) -> list[int]:
+    """Queue background analysis for those of the player's `latest` newest games that
+    lack a fresh analysis by this engine's config (ADR-004). Returns their game ids."""
+    if latest <= 0:
+        return []
+    with session_factory.begin() as session:
+        repo = AnalysisRepository(session)
+        config_id = repo.get_or_create_config(engine.identity, engine.settings).id
+        game_ids = repo.latest_games_needing_analysis(
+            player_id, config_id=config_id, limit=latest, among_latest=latest
+        )
+        jobs = JobRepository(session)
+        for game_id in game_ids:
+            _enqueue(jobs, game_id, PRIORITY_BACKGROUND)
+    log.info("analysis_queued", player_id=player_id, games=len(game_ids), window=latest)
+    return game_ids
+
+
+def _enqueue(jobs: JobRepository, game_id: int, priority: int) -> tuple[int, bool]:
+    job, created = jobs.enqueue(
+        ANALYSE_JOB_TYPE, {"game_id": game_id}, dedup_key=f"analyse:{game_id}", priority=priority
+    )
+    return job.id, created
 
 
 def _classify(game: GameToAnalyse, results: list[EngineResult]) -> list[ClassificationRow]:

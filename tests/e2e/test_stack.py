@@ -1,6 +1,7 @@
 """End-to-end: drive the running docker compose stack over HTTP, like a real client.
 
     API → ops.jobs → worker container → stub Chess.com → raw → core → API
+                                      → Stockfish (real, in the image) → analysis → API
 
 Needs the e2e stack running (see tests/e2e/compose.yaml); excluded from normal runs.
     uv run pytest -m e2e
@@ -14,7 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.e2e
 
-API = os.environ.get("CHESS_E2E_API_URL", "http://127.0.0.1:8000")
+API = os.environ.get("CHESS_E2E_API_URL", "http://127.0.0.1:18000")  # tests/e2e/compose.yaml
 PLAYER = "e2e_player"  # served by tests/e2e/stub_chesscom.py
 JOB_TIMEOUT_SECONDS = 60
 
@@ -62,6 +63,28 @@ def test_sync_through_the_whole_stack(api: httpx2.Client) -> None:
 
     detail = api.get(f"/api/v1/games/{newest['game_id']}").json()
     assert [m["san"] for m in detail["moves"]][-1] == "Qxf7#"
+
+
+def test_synced_games_are_analysed_with_stockfish(api: httpx2.Client) -> None:
+    # The sync above queued both games for background analysis. Asking again returns that
+    # job (moved ahead) or, if it already finished, a new one that finds nothing to do.
+    games = api.get(f"/api/v1/players/{PLAYER}/games").json()["items"]
+    for game in games:
+        response = api.post(f"/api/v1/games/{game['game_id']}/analysis")
+        assert response.status_code == 202, response.text
+        job = wait_for_job(api, response.json()["job_id"])
+        assert job["status"] == "succeeded", job
+
+        analysis = api.get(f"/api/v1/games/{game['game_id']}/analysis").json()
+        assert (analysis["status"], analysis["fresh"]) == ("succeeded", True)
+        assert (analysis["engine"]["name"], analysis["engine"]["version"]) == ("stockfish", "19")
+        assert analysis["engine"]["nodes_per_position"] == 20_000
+        assert len(analysis["positions"]) == game["ply_count"] + 1
+        assert len(analysis["moves"]) == game["ply_count"]
+
+    newest = api.get(f"/api/v1/games/{games[0]['game_id']}/analysis").json()
+    assert newest["positions"][-1]["mate_in"] == 0  # ends in Qxf7#: Black is mated
+    assert newest["moves"][-1]["san"] == "Qxf7#"
 
 
 def test_second_sync_is_idempotent(api: httpx2.Client) -> None:

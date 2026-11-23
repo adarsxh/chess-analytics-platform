@@ -271,7 +271,7 @@ the label CHECK was added in migration 0004.
 | attempts, max_attempts | smallint | |
 | run_after | timestamptz | Retry backoff |
 | locked_by, locked_until | text, timestamptz, nullable | Lease; expired lease = reclaimable |
-| dedup_key | text, nullable | e.g. `sync:chesscom:<player_id>`, `analyse:<game_id>:<config_id>` |
+| dedup_key | text, nullable | e.g. `sync:chesscom:<username>`, `analyse:<game_id>` (ADR-025) |
 | last_error | text, nullable | |
 | created_at, started_at, finished_at, updated_at | timestamptz | |
 
@@ -309,7 +309,8 @@ PR. Each test asserts the **specific named constraint** that must fire.
    version already exists, update its `last_seen_at`.
 4. Process the new current versions into `core` (one transaction per game). Record failures in
    `processing_failures`.
-5. Enqueue analysis for the latest N games (deduplicated).
+5. Enqueue `analyse_game` (background priority, deduplicated per game) for those of the
+   player's latest N games without a fresh analysis by the worker's engine config (ADR-025).
 
 **Needs processing:** a game whose current raw version ≠ `games.raw_game_id`, or whose
 `games.parser_version` < the current parser version. This is derived by query, not by a flag.

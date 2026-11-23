@@ -17,7 +17,7 @@ import structlog
 from chess_analytics.config import get_settings
 from chess_analytics.logging_setup import configure_logging
 from chess_analytics.storage.db import create_db_engine, create_session_factory
-from chess_analytics.worker.handlers import build_handlers
+from chess_analytics.worker.handlers import build_handlers, stockfish_holder
 from chess_analytics.worker.runner import Worker
 
 log = structlog.get_logger(__name__)
@@ -41,9 +41,10 @@ def main() -> None:
 
     engine = create_db_engine(settings)
     session_factory = create_session_factory(engine)
+    engines = stockfish_holder(settings)  # Stockfish starts on the first job that needs it
     worker = Worker(
         session_factory,
-        build_handlers(settings, session_factory),
+        build_handlers(settings, session_factory, engines),
         worker_id=f"{socket.gethostname()}:{os.getpid()}",
         poll_interval=settings.worker_poll_interval_seconds,
         lease=timedelta(seconds=settings.worker_lease_seconds),
@@ -51,6 +52,7 @@ def main() -> None:
     try:
         worker.run(stop)
     finally:
+        engines.close()
         engine.dispose()
 
 

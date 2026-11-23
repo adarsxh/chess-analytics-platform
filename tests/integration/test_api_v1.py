@@ -16,10 +16,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from chess_analytics.api.app import create_app
 from chess_analytics.api.dependencies import get_session_factory
 from chess_analytics.domain.game import Color, GameResult, Outcome, ParsedPlayer, TimeClass
+from chess_analytics.engine.base import EngineError
+from chess_analytics.services.analyse import analyse_game
+from chess_analytics.storage.models.core import Game
 from chess_analytics.storage.repositories.core import CoreRepository
 from chess_analytics.storage.repositories.players import PlayerRepository
+from tests.fakes import FakeEngine
 
-from .factories import make_parsed_game, make_raw_game
+from .factories import make_parsed_game, make_raw_game, store_game
 
 pytestmark = pytest.mark.integration
 
@@ -197,6 +201,90 @@ def test_game_detail_with_moves(client: TestClient, session_factory) -> None:
 
 def test_unknown_game_is_404(client: TestClient) -> None:
     assert client.get("/api/v1/games/999999999").status_code == 404
+
+
+# --------------------------------------------------------------- analysis ---
+
+
+def test_request_analysis_returns_202_with_a_job(client: TestClient, session_factory) -> None:
+    game_id = store_game(session_factory)
+
+    response = client.post(f"/api/v1/games/{game_id}/analysis")
+    again = client.post(f"/api/v1/games/{game_id}/analysis").json()
+
+    assert response.status_code == 202
+    body = response.json()
+    assert (body["job_type"], body["payload"], body["created"]) == (
+        "analyse_game", {"game_id": game_id}, True,
+    )  # fmt: skip
+    assert response.headers["location"] == f"/api/v1/jobs/{body['job_id']}"
+    assert (again["job_id"], again["created"]) == (body["job_id"], False)
+
+
+def test_analysis_of_an_unknown_game_is_404(client: TestClient) -> None:
+    assert client.post("/api/v1/games/999999999/analysis").status_code == 404
+    response = client.get("/api/v1/games/999999999/analysis")
+    assert (response.status_code, response.json()["detail"]) == (404, "game 999999999 not found")
+
+
+def test_a_game_never_analysed_is_404_with_a_hint(client: TestClient, session_factory) -> None:
+    game_id = store_game(session_factory)
+    response = client.get(f"/api/v1/games/{game_id}/analysis")
+    assert response.status_code == 404
+    assert "POST to this URL" in response.json()["detail"]
+
+
+def test_analysis_with_evaluations_and_labels(client: TestClient, session_factory) -> None:
+    game_id = store_game(session_factory)
+    analyse_game(game_id, engine=FakeEngine(), session_factory=session_factory)
+
+    body = client.get(f"/api/v1/games/{game_id}/analysis").json()
+
+    assert (body["status"], body["fresh"], body["error"], body["classifier_version"]) == (
+        "succeeded", True, None, 1,
+    )  # fmt: skip
+    assert (body["engine"]["name"], body["engine"]["nodes_per_position"]) == ("fake", 1000)
+    assert [p["ply"] for p in body["positions"]] == [0, 1, 2, 3, 4]
+    mate = body["positions"][-1]
+    assert (mate["mate_in"], mate["score_cp"], mate["best_move_uci"], mate["pv_uci"]) == (
+        0, None, None, [],
+    )  # fmt: skip
+    assert [(m["ply"], m["san"], m["uci"]) for m in body["moves"]] == [
+        (1, "f3", "f2f3"), (2, "e5", "e7e5"), (3, "g4", "g2g4"), (4, "Qh4#", "d8h4"),
+    ]  # fmt: skip
+    labels = {"forced", "best", "excellent", "good", "inaccuracy", "mistake", "blunder"}
+    assert all(m["label"] in labels and float(m["win_loss"]) >= 0 for m in body["moves"])
+
+
+def test_a_failed_reanalysis_hides_rows_and_shows_the_error(
+    client: TestClient, session_factory
+) -> None:
+    game_id = store_game(session_factory)
+    analyse_game(game_id, engine=FakeEngine(), session_factory=session_factory)
+    with session_factory.begin() as session:  # the platform corrected the game's moves
+        session.get(Game, game_id).moves_hash = "re-processed"
+    with pytest.raises(EngineError):
+        analyse_game(game_id, engine=FakeEngine(fail_after=0), session_factory=session_factory)
+
+    body = client.get(f"/api/v1/games/{game_id}/analysis").json()
+
+    assert (body["status"], body["fresh"]) == ("failed", True)
+    assert "fake engine crashed" in body["error"]
+    assert (body["positions"], body["moves"], body["classifier_version"]) == ([], [], None)
+
+
+def test_a_fresh_analysis_is_preferred_over_a_newer_failed_one(
+    client: TestClient, session_factory
+) -> None:
+    game_id = store_game(session_factory)
+    good = analyse_game(game_id, engine=FakeEngine(), session_factory=session_factory)
+    other_config = FakeEngine(fail_after=0, settings=replace(FakeEngine().settings, hash_mb=1))
+    with pytest.raises(EngineError):
+        analyse_game(game_id, engine=other_config, session_factory=session_factory)
+
+    body = client.get(f"/api/v1/games/{game_id}/analysis").json()
+
+    assert (body["analysis_id"], body["status"]) == (good.analysis_id, "succeeded")
 
 
 def test_business_endpoints_are_versioned_health_is_not(client: TestClient) -> None:

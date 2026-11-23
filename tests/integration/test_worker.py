@@ -10,19 +10,26 @@ import pytest
 from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from chess_analytics.engine.base import EngineError
 from chess_analytics.ingestion.base import ArchiveRef, SourceGame, SourcePlayer
-from chess_analytics.services.sync import request_sync
+from chess_analytics.services.sync import SyncSummary, request_sync
+from chess_analytics.storage.models.analysis import GameAnalysis
 from chess_analytics.storage.models.ops import Job
 from chess_analytics.storage.models.raw import RawGame
 from chess_analytics.storage.repositories.jobs import JobRepository
 from chess_analytics.worker.handlers import (
+    EngineHolder,
     PermanentJobError,
     RetryableJobError,
+    handle_analyse_game,
     handle_sync_player,
+    queue_auto_analysis,
 )
 from chess_analytics.worker.runner import Worker
-from tests.fakes import FakeGameSource
+from tests.fakes import FakeEngine, FakeGameSource
 from tests.samples import chesscom_game
+
+from .factories import store_game
 
 pytestmark = pytest.mark.integration
 
@@ -155,15 +162,28 @@ def fake_source(**overrides) -> FakeGameSource:
     return FakeGameSource(**(values | overrides))
 
 
-def run_handler(session_factory, source, payload) -> None:
+def run_handler(session_factory, source, payload, on_synced=None) -> None:
     handle_sync_player(payload, session_factory=session_factory,
-                       source_factory=lambda platform: nullcontext(source))  # fmt: skip
+                       source_factory=lambda platform: nullcontext(source),
+                       on_synced=on_synced)  # fmt: skip
 
 
 def test_sync_handler_syncs_the_player(session_factory) -> None:
     run_handler(session_factory, fake_source(), {"platform": "chesscom", "username": "someone"})
     with session_factory() as session:
         assert session.scalar(select(RawGame.platform_game_id)) == "g-1"
+
+
+def test_a_successful_sync_triggers_auto_analysis(session_factory) -> None:
+    synced: list[SyncSummary] = []
+    payload = {"platform": "chesscom", "username": "someone"}
+    run_handler(session_factory, fake_source(), payload, on_synced=synced.append)
+    assert [s.username for s in synced] == ["SomeOne"]
+
+    with pytest.raises(RetryableJobError):
+        run_handler(session_factory, fake_source(failing_urls={OCT.url}), payload,
+                    on_synced=synced.append)  # fmt: skip
+    assert len(synced) == 1  # a failed sync queues nothing
 
 
 def test_sync_handler_unknown_player_is_permanent(session_factory) -> None:
@@ -190,3 +210,73 @@ def test_request_sync_deduplicates_case_insensitively(session_factory) -> None:
     again, created_again = request_sync(session_factory, platform="chesscom", username="someone")
     assert created and not created_again
     assert again == first
+
+
+# ---------------------------------------------------------- analyse handler ---
+
+
+def holder(*engines: FakeEngine) -> EngineHolder:
+    """An EngineHolder handing out the given engines in order, one per (re)start."""
+    remaining = list(engines)
+    return EngineHolder(lambda: remaining.pop(0))
+
+
+def test_engine_holder_starts_lazily_reuses_and_restarts() -> None:
+    first, second = FakeEngine(), FakeEngine()
+    engines = holder(first, second)
+
+    assert engines.get() is first and engines.get() is first
+    engines.discard()
+    assert first.closed and engines.get() is second
+    engines.close()
+    assert second.closed
+    engines.close()  # nothing running: a no-op
+
+
+def test_analyse_handler_analyses_the_game(session_factory) -> None:
+    game_id = store_game(session_factory)
+    engine = FakeEngine()
+
+    handle_analyse_game({"game_id": game_id}, session_factory=session_factory,
+                        engines=holder(engine))  # fmt: skip
+
+    assert engine.new_games == 1
+    with session_factory() as session:
+        analysis = session.scalars(select(GameAnalysis).where(GameAnalysis.game_id == game_id))
+        assert analysis.one().status == "succeeded"
+
+
+@pytest.mark.parametrize("payload", [{}, {"game_id": "5"}, {"game_id": True}, {"game_id": 0}])
+def test_analyse_handler_rejects_a_malformed_payload(session_factory, payload) -> None:
+    with pytest.raises(PermanentJobError, match="invalid"):
+        handle_analyse_game(payload, session_factory=session_factory, engines=holder())
+
+
+def test_analyse_handler_unknown_game_is_permanent(session_factory) -> None:
+    with pytest.raises(PermanentJobError, match="not found"):
+        handle_analyse_game({"game_id": 999_999_999}, session_factory=session_factory,
+                            engines=holder(FakeEngine()))  # fmt: skip
+
+
+def test_an_engine_crash_is_retryable_with_a_new_engine(session_factory) -> None:
+    game_id = store_game(session_factory)
+    crashing, healthy = FakeEngine(fail_after=1), FakeEngine()
+    engines = holder(crashing, healthy)
+
+    with pytest.raises(RetryableJobError, match="engine failed"):
+        handle_analyse_game({"game_id": game_id}, session_factory=session_factory, engines=engines)
+    assert crashing.closed
+
+    handle_analyse_game({"game_id": game_id}, session_factory=session_factory, engines=engines)
+    assert len(healthy.analysed) == 4
+
+
+def test_auto_analysis_survives_an_engine_that_cannot_start(session_factory) -> None:
+    def cannot_start():
+        raise EngineError("cannot start engine 'stockfish': not found")
+
+    summary = SyncSummary(run_id=1, player_id=1, username="someone", status="succeeded")
+    queue_auto_analysis(summary, latest=20, session_factory=session_factory,
+                        engines=EngineHolder(cannot_start))  # fmt: skip
+    with session_factory() as session:
+        assert session.scalars(select(Job)).all() == []

@@ -97,8 +97,10 @@ only in that platform's adapter. Adding a new platform means adding
 5. **Processed layer:** in the same job, new raw versions are normalised into games,
    sides and moves (one transaction per game), with a reference to the raw record and the
    `parser_version`. Rejected games are recorded in `core.processing_failures`.
-6. Analysis jobs are enqueued for the latest `AUTO_ANALYSE_LATEST_N` standard-chess
-   games; the rest can be requested on demand.
+6. After a successful sync the worker enqueues `analyse_game` jobs (background priority)
+   for the player's latest `CHESS_AUTO_ANALYSE_LATEST_N` (20) games not yet analysed;
+   any other game is analysed on demand (`POST /api/v1/games/{id}/analysis`, ahead of
+   background work). Only standard chess reaches `core`, so every game is analysable.
 7. **Analysis layer:** Stockfish evaluates each position. Evaluations and
    classifications are stored under an analysis run that records the engine version
    and full configuration.

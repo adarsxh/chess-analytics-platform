@@ -6,9 +6,15 @@ SQL and the API's response models stay independent of the table layout.
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session, aliased
 
+from chess_analytics.storage.models.analysis import (
+    AnalysisConfig,
+    GameAnalysis,
+    MoveClassification,
+    PositionEvaluation,
+)
 from chess_analytics.storage.models.core import Game, GameMove, GamePlayer, Player, TrackedPlayer
 
 
@@ -163,5 +169,102 @@ class GameQueries:
             "ply_count": game.ply_count,
             "white": by_color["white"],
             "black": by_color["black"],
+            "moves": moves,
+        }
+
+    # --------------------------------------------------------------- analysis ---
+
+    def game_exists(self, game_id: int) -> bool:
+        return self._session.get(Game, game_id) is not None
+
+    def game_analysis(self, game_id: int) -> dict[str, Any] | None:
+        """The game's most useful analysis, or None if it has never been analysed.
+
+        A game can have one analysis per engine config. Prefer a fresh, successful one
+        (moves unchanged since), then the most recently updated (e.g. one now running).
+        Evaluations and labels are only returned for a successful analysis: while one
+        is running or after it failed, the stored rows may belong to older moves.
+        Labels come from the newest classifier version stored for it.
+        """
+        game = self._session.get(Game, game_id)
+        if game is None:
+            return None
+        fresh = and_(GameAnalysis.status == "succeeded", GameAnalysis.moves_hash == game.moves_hash)
+        row = self._session.execute(
+            select(GameAnalysis, AnalysisConfig)
+            .join(AnalysisConfig, AnalysisConfig.id == GameAnalysis.analysis_config_id)
+            .where(GameAnalysis.game_id == game_id)
+            .order_by(
+                case((fresh, 0), else_=1), GameAnalysis.updated_at.desc(), GameAnalysis.id.desc()
+            )  # fmt: skip
+            .limit(1)
+        ).one_or_none()
+        if row is None:
+            return None
+        analysis, config = row
+        positions, moves, version = [], [], None
+        if analysis.status == "succeeded":
+            positions = [
+                {
+                    "ply": e.ply,
+                    "score_cp": e.score_cp,
+                    "mate_in": e.mate_in,
+                    "best_move_uci": e.best_move_uci,
+                    "pv_uci": e.pv_uci or [],
+                    "depth": e.depth_reached,
+                }
+                for e in self._session.scalars(
+                    select(PositionEvaluation)
+                    .where(
+                        PositionEvaluation.game_analysis_id == analysis.id,
+                        PositionEvaluation.pv_rank == 1,
+                    )
+                    .order_by(PositionEvaluation.ply)
+                )
+            ]
+            version = self._session.scalar(
+                select(func.max(MoveClassification.classifier_version)).where(
+                    MoveClassification.game_analysis_id == analysis.id
+                )
+            )
+            moves = [
+                dict(m)
+                for m in self._session.execute(
+                    select(
+                        MoveClassification.ply,
+                        GameMove.san,
+                        GameMove.uci,
+                        MoveClassification.label,
+                        MoveClassification.eval_loss.label("win_loss"),
+                    )
+                    .join(
+                        GameMove,
+                        and_(GameMove.game_id == game_id, GameMove.ply == MoveClassification.ply),
+                    )
+                    .where(
+                        MoveClassification.game_analysis_id == analysis.id,
+                        MoveClassification.classifier_version == version,
+                    )
+                    .order_by(MoveClassification.ply)
+                ).mappings()
+            ]
+        return {
+            "game_id": game_id,
+            "analysis_id": analysis.id,
+            "status": analysis.status,
+            "fresh": analysis.moves_hash == game.moves_hash,
+            "error": analysis.error,
+            "started_at": analysis.started_at,
+            "finished_at": analysis.finished_at,
+            "engine": {
+                "name": config.engine_name,
+                "version": config.engine_version,
+                "nodes_per_position": config.nodes_per_position,
+                "threads": config.threads,
+                "hash_mb": config.hash_mb,
+                "multipv": config.multipv,
+            },
+            "classifier_version": version,
+            "positions": positions,
             "moves": moves,
         }

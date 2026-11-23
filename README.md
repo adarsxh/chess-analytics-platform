@@ -92,9 +92,15 @@ Re-running is safe: up-to-date games are skipped, a new classifier version re-la
 stored evaluations without the engine, and different engine settings add a new analysis
 next to the old one. A game whose moves changed since its analysis is analysed again.
 
+The worker does this automatically: after each sync it queues the player's 20 newest
+unanalysed games (`CHESS_AUTO_ANALYSE_LATEST_N`, 0 = off) as background work, and
+`POST /api/v1/games/{id}/analysis` queues any other game ahead of that. One worker
+analyses ~20 games in ~13 minutes on an Apple M-series core; each extra worker adds a
+core (`docker compose up --scale worker=4` ≈ 3–4 minutes).
+
 ## Background worker
 
-Long-running work (syncs now, engine analysis later) runs in a separate worker process
+Long-running work (syncs and engine analysis) runs in a separate worker process
 that takes jobs from a Postgres queue (`ops.jobs`).
 
 ```bash
@@ -103,8 +109,9 @@ uv run python -m chess_analytics request-sync <user>  # queue a sync for it
 ```
 
 In Docker, `docker compose up` starts a worker next to the API; add workers with
-`docker compose up --scale worker=3`. Duplicate requests for the same player return the
-job already queued; failed jobs are retried with backoff (30 s, 2 min, 8 min).
+`docker compose up --scale worker=3`. Duplicate requests (same player, same game) return
+the job already queued; failed jobs are retried with backoff (30 s, 2 min, 8 min). The
+worker starts Stockfish on its first analysis and keeps it running for the next ones.
 
 ## API
 
@@ -118,6 +125,8 @@ versioned under `/api/v1`; `/health` and `/health/ready` are not.
 | GET | `/api/v1/players/{username}` | Profile and win/loss/draw record |
 | GET | `/api/v1/players/{username}/games` | Games, newest first: `limit`, `offset`, `time_class`, `outcome`, `rated` |
 | GET | `/api/v1/games/{game_id}` | One game with both sides and moves (`include_moves=false` to skip) |
+| POST | `/api/v1/games/{game_id}/analysis` | Queue a Stockfish analysis → `202` + job (duplicates return the same job) |
+| GET | `/api/v1/games/{game_id}/analysis` | Evaluation of every position and a label for every move (`404` until analysed) |
 
 ## Database migrations
 
@@ -151,7 +160,9 @@ with synthetic data. Engine tests (`tests/engine`) run a real Stockfish found on
 the pinned version and requires them.
 
 End-to-end tests run the whole stack in Docker, with Chess.com replaced by a local stub
-(CI runs them on every PR):
+and a real Stockfish analysing the synced games (CI runs them on every PR). The e2e stack
+is a separate compose project (`chess-analytics-e2e`, API on port 18000), so it runs
+alongside your development stack and its `down -v` only removes its own database:
 
 ```bash
 docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example up -d --build --wait
