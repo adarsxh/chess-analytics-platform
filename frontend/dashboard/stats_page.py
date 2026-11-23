@@ -49,18 +49,18 @@ def render() -> None:
 
 def _headline(overview: dict, accuracy: dict) -> None:
     total, summary, coverage = overview["total"], accuracy["summary"], accuracy["coverage"]
-    columns = st.columns(5)
+    columns = st.columns(4)
     columns[0].metric("Games", f"{total['games']:,}")
     columns[1].metric("Score", f"{total['score_percent']} %", help="Win = 1 point, draw = ½")
-    columns[2].metric("W / D / L", f"{total['wins']} / {total['draws']} / {total['losses']}")
-    columns[3].metric(
+    columns[2].metric(
         "Accuracy",
         f"{summary['accuracy']} %" if summary["accuracy"] is not None else "–",
         help="This project's accuracy (ADR-026), not Chess.com's",
     )
-    columns[4].metric("Blunders / game", summary["blunders_per_game"] or "–")
+    columns[3].metric("Blunders / game", summary["blunders_per_game"] or "–")
     st.caption(
-        f"Accuracy and errors cover {coverage['analysed_games']} of {coverage['total_games']}"
+        f"{total['wins']:,} wins · {total['draws']:,} draws · {total['losses']:,} losses. "
+        f"Accuracy and errors cover {coverage['analysed_games']:,} of {coverage['total_games']:,}"
         f" games ({coverage['percent']} %): only analysed games have engine statistics."
     )
 
@@ -97,13 +97,18 @@ def _rating_history(points: list[dict]) -> None:
     if not points:
         st.caption("No rated games in this range.")
         return
+    frame = rating_frame(points)
+    # One time class at a time: each has its own rating, and lines of rarely played classes
+    # would otherwise cut straight across years without games. Default: the most played.
+    played = frame.groupby("time_class")["games"].sum().sort_values(ascending=False)
+    choice = st.radio("Time class", list(played.index), horizontal=True,
+                      label_visibility="collapsed", key="rating_time_class")  # fmt: skip
     chart = (
-        alt.Chart(rating_frame(points))
+        alt.Chart(frame[frame["time_class"] == choice])
         .mark_line(point=alt.OverlayMarkDef(size=12))
         .encode(
             x=alt.X("day:T", title=None),
             y=alt.Y("rating:Q", scale=alt.Scale(zero=False), title="Rating"),
-            color=alt.Color("time_class:N", sort=TIME_CLASSES, title="Time class"),
             tooltip=["day:T", "time_class", "rating", "games"],
         )
     )
@@ -125,6 +130,10 @@ def _openings(openings: list[dict]) -> None:
             column_config={
                 "opening": "Opening",
                 "eco": "ECO",
+                "games": "Games",
+                "wins": "Wins",
+                "draws": "Draws",
+                "losses": "Losses",
                 "score_percent": st.column_config.ProgressColumn(
                     "Score", format="%.1f %%", min_value=0, max_value=100
                 ),
@@ -148,11 +157,15 @@ def _accuracy(accuracy: dict) -> None:
     long["source"] = long["source"].map({"accuracy": "Ours", "source_accuracy": "Chess.com"})
     chart = (
         alt.Chart(long)
-        .mark_line(point=True)
+        .mark_circle(size=70, opacity=0.85)  # dots: games are separate events, not a series
         .encode(
             x=alt.X("end_time:T", title=None),
             y=alt.Y("value:Q", scale=alt.Scale(domain=[0, 100]), title="Accuracy %"),
-            color=alt.Color("source:N", title=None),
+            color=alt.Color(
+                "source:N",
+                title=None,
+                scale=alt.Scale(domain=["Ours", "Chess.com"], range=["#4c8bf5", "#f2a541"]),
+            ),
             tooltip=["end_time:T", "game_id", "outcome", "source", "value", "blunders"],
         )
     )

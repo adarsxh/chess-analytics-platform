@@ -8,6 +8,7 @@ real responses (the stub player, synced and analysed by the real worker and Stoc
 import os
 from pathlib import Path
 
+import httpx2
 import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
@@ -36,3 +37,33 @@ def test_statistics_page_renders_real_responses() -> None:
     assert metrics["Games"] == "2"
     assert "cover 2 of 2 games" in app.caption[0].value
     assert len(app.get("vega_lite_chart")) == 4
+
+
+def games_script() -> None:
+    from dashboard import games_page
+
+    games_page.render()
+
+
+def game_script() -> None:
+    from dashboard import game_page
+
+    game_page.render()
+
+
+def test_games_and_game_pages_render_real_responses() -> None:
+    games = AppTest.from_function(games_script, default_timeout=30)
+    games.session_state["username"] = PLAYER
+    games.run()
+    assert not games.exception and not games.error
+    listing = games.dataframe[0].value
+    assert len(listing) == 2 and listing["accuracy"].notna().all()  # both analysed
+
+    newest = int(httpx2.get(f"{API}/api/v1/players/{PLAYER}/games").json()["items"][0]["game_id"])
+    game = AppTest.from_function(game_script, default_timeout=30)
+    game.session_state["game_id"] = newest
+    game.run()
+    assert not game.exception and not game.error
+    assert [m.label for m in game.metric] == ["White accuracy", "Black accuracy"]
+    assert len(game.get("vega_lite_chart")) == 1
+    assert game.dataframe[0].value["san"].iloc[-1].startswith("Qxf7#")

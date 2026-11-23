@@ -183,6 +183,7 @@ class EvaluatedPosition(BaseModel):
 
 class ClassifiedMove(BaseModel):
     ply: int
+    color: Literal["white", "black"] = Field(description="Who made the move")
     san: str
     uci: str
     label: MoveLabel
@@ -199,6 +200,9 @@ class GameAnalysisResponse(BaseModel):
     finished_at: datetime | None
     engine: EngineConfig
     classifier_version: int | None
+    accuracy: dict[Literal["white", "black"], Decimal | None] = Field(
+        description="Each side's game accuracy (ADR-026); empty unless status is succeeded"
+    )
     positions: list[EvaluatedPosition] = Field(description="Empty unless status is succeeded")
     moves: list[ClassifiedMove] = Field(description="Empty unless status is succeeded")
 

@@ -1,0 +1,8 @@
+# Local runs (`streamlit run app.py`): reachable from this machine only, like the API's
+# 127.0.0.1 default, and no usage statistics sent. The Docker image overrides the address
+# with STREAMLIT_SERVER_ADDRESS=0.0.0.0 (environment variables win over this file).
+[server]
+address = "127.0.0.1"
+
+[browser]
+gatherUsageStats = false

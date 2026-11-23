@@ -141,8 +141,11 @@ Accuracy is this project's own (ADR-026), so it differs from Chess.com's.
 
 A Streamlit app in `frontend/` (its own project and image; it reaches the backend only
 through the API, ADR-005 / ADR-027). Pick a player and optional time class / dates in the
-sidebar to see results, rating history, openings and accuracy (with how many games are
-analysed).
+sidebar. **Statistics**: results, rating history, openings and accuracy (with how many games
+are analysed). **Games**: the player's games; select one to open it. **Game**: both sides'
+accuracy, the evaluation over the game with errors marked, every move with its label, and
+an *Analyse* button for games outside the latest 20. *Sync from Chess.com* in the sidebar
+queues a sync and follows it until it finishes.
 
 ```bash
 docker compose up --build            # whole stack; dashboard at http://127.0.0.1:8501

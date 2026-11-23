@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from chess_analytics.analytics.accuracy import game_accuracy
 from chess_analytics.api.app import create_app
 from chess_analytics.api.dependencies import get_session_factory
 from chess_analytics.domain.game import Color, GameResult, Outcome, ParsedPlayer, TimeClass
@@ -249,9 +250,17 @@ def test_analysis_with_evaluations_and_labels(client: TestClient, session_factor
     assert (mate["mate_in"], mate["score_cp"], mate["best_move_uci"], mate["pv_uci"]) == (
         0, None, None, [],
     )  # fmt: skip
-    assert [(m["ply"], m["san"], m["uci"]) for m in body["moves"]] == [
-        (1, "f3", "f2f3"), (2, "e5", "e7e5"), (3, "g4", "g2g4"), (4, "Qh4#", "d8h4"),
+    assert [(m["ply"], m["color"], m["san"]) for m in body["moves"]] == [
+        (1, "white", "f3"), (2, "black", "e5"), (3, "white", "g4"), (4, "black", "Qh4#"),
     ]  # fmt: skip
+    expected = {
+        side: str(round(Decimal(game_accuracy(
+            float(m["win_loss"]) for m in body["moves"]
+            if m["color"] == side and m["label"] != "forced"
+        )), 1))
+        for side in ("white", "black")
+    }  # fmt: skip
+    assert body["accuracy"] == expected
     labels = {"forced", "best", "excellent", "good", "inaccuracy", "mistake", "blunder"}
     assert all(m["label"] in labels and float(m["win_loss"]) >= 0 for m in body["moves"])
 
@@ -271,6 +280,7 @@ def test_a_failed_reanalysis_hides_rows_and_shows_the_error(
     assert (body["status"], body["fresh"]) == ("failed", True)
     assert "fake engine crashed" in body["error"]
     assert (body["positions"], body["moves"], body["classifier_version"]) == ([], [], None)
+    assert body["accuracy"] == {}
 
 
 def test_a_fresh_analysis_is_preferred_over_a_newer_failed_one(
