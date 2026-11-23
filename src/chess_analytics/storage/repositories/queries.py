@@ -227,8 +227,9 @@ class GameQueries:
                     MoveClassification.game_analysis_id == analysis.id
                 )
             )
+            white_first = game.initial_fen.split()[1] == "w"
             moves = [
-                dict(m)
+                dict(m) | {"color": "white" if (m["ply"] % 2 == 1) == white_first else "black"}
                 for m in self._session.execute(
                     select(
                         MoveClassification.ply,
