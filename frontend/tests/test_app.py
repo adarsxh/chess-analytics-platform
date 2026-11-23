@@ -85,3 +85,14 @@ def test_an_unknown_player_gets_a_hint_not_a_crash(fake_api: FakeApi) -> None:
     app = run("ghost")
     assert not app.exception
     assert "hasn't been synced yet" in app.warning[0].value
+
+
+def test_rating_chart_labels_month_and_year_and_zooms_only_in_time() -> None:
+    from dashboard.stats_page import rating_chart
+    from dashboard.tables import rating_frame
+
+    spec = rating_chart(rating_frame(STATS["rating-history"])).to_dict()
+
+    assert spec["encoding"]["x"]["axis"]["format"] == "%b '%y"  # e.g. Jul '25
+    (zoom,) = spec["params"]
+    assert zoom["bind"] == "scales" and zoom["select"]["encodings"] == ["x"]

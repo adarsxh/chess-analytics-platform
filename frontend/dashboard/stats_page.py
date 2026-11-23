@@ -16,6 +16,9 @@ from dashboard.tables import (
 )
 
 OUTCOME_COLORS = alt.Scale(domain=OUTCOMES, range=["#4c9a5b", "#9e9e9e", "#c4524a"])
+# Month and short year on every tick ("Jul '25"): the default labels name the year only at
+# January, so a lone "July" doesn't say which year it is.
+MONTH_YEAR = "%b '%y"
 
 
 def render() -> None:
@@ -103,16 +106,23 @@ def _rating_history(points: list[dict]) -> None:
     played = frame.groupby("time_class")["games"].sum().sort_values(ascending=False)
     choice = st.radio("Time class", list(played.index), horizontal=True,
                       label_visibility="collapsed", key="rating_time_class")  # fmt: skip
-    chart = (
-        alt.Chart(frame[frame["time_class"] == choice])
+    st.altair_chart(rating_chart(frame[frame["time_class"] == choice]), width="stretch")
+    st.caption("One point per day played: the rating after that day's last rated game. "
+               "Drag to pan, scroll to zoom, double-click to reset.")  # fmt: skip
+
+
+def rating_chart(frame) -> alt.Chart:
+    """Rating over time. Zoom and pan move only the time axis; the rating axis stays fixed."""
+    return (
+        alt.Chart(frame)
         .mark_line(point=alt.OverlayMarkDef(size=12))
         .encode(
-            x=alt.X("day:T", title=None),
+            x=alt.X("day:T", title=None, axis=alt.Axis(format=MONTH_YEAR)),
             y=alt.Y("rating:Q", scale=alt.Scale(zero=False), title="Rating"),
-            tooltip=["day:T", "time_class", "rating", "games"],
+            tooltip=[alt.Tooltip("day:T", format="%d %b %Y"), "time_class", "rating", "games"],
         )
+        .interactive(bind_y=False)
     )
-    st.altair_chart(chart, width="stretch")
 
 
 def _openings(openings: list[dict]) -> None:
@@ -159,7 +169,7 @@ def _accuracy(accuracy: dict) -> None:
         alt.Chart(long)
         .mark_circle(size=70, opacity=0.85)  # dots: games are separate events, not a series
         .encode(
-            x=alt.X("end_time:T", title=None),
+            x=alt.X("end_time:T", title=None, axis=alt.Axis(format=MONTH_YEAR)),
             y=alt.Y("value:Q", scale=alt.Scale(domain=[0, 100]), title="Accuracy %"),
             color=alt.Color(
                 "source:N",
