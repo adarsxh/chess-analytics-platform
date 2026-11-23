@@ -877,3 +877,42 @@ openings, accuracy and errors (the README's V1 set). ADR-008 puts analytics SQL 
   moves (planned for V2) would work across platforms.
 - (−) Queries scan the player's games on each request; fine for thousands of games, to be
   revisited (materialised views) if needed.
+
+---
+
+## ADR-027: Dashboard as a separate project in `frontend/`
+
+- **Status:** Accepted · **Date:** 2026-11-23
+
+### Context
+ADR-005 chose Streamlit and HTTP-only communication with the backend. Streamlit brings
+pandas, pyarrow and friends (several hundred MB) that the API and worker don't need, and
+"never import the backend" should be hard to break by accident.
+
+### Decision
+- **`frontend/` is its own uv project** (`package = false`, own `uv.lock`), with its own
+  Dockerfile and a `dashboard` compose service (port 8501, waits for a healthy API). The
+  backend is not one of its dependencies, so importing it fails: the boundary is enforced
+  by construction, not by review.
+- **One client module** (`dashboard/api.py`) maps endpoints to methods and HTTP failures
+  to `NotFound` / `ApiError`; pages never build URLs. Pure `dashboard/tables.py` shapes JSON
+  for charts (Altair). Responses are cached for 60 s (`st.cache_data`).
+- **Tests:** the client against a scripted transport; pages with Streamlit's `AppTest`
+  against a fake API; and an `e2e` test rendering the pages against the e2e stack's real
+  API, so the fake can't drift from real responses (the contract check). CI runs all three;
+  root `ruff` lints both projects (`src = ["src", "frontend"]`).
+
+### Alternatives
+- **Same project with a `frontend` dependency group:** one lock file and simpler setup,
+  but Streamlit's dependencies would be resolved with the backend's, and the import rule
+  only enforced by a test.
+- **uv workspace:** shares one lock across members, which is what we want to avoid here.
+- **Generated API client from OpenAPI:** less hand-written code, but a build step and
+  generated code for a dozen endpoints; the contract test covers drift instead.
+
+### Consequences
+- (+) The API/worker image is unchanged; the dashboard can be replaced (ADR-005: likely
+  in V4) without touching the backend.
+- (+) A change to an API response that breaks the dashboard fails CI.
+- (−) Two projects to keep updated (dependencies, Python version).
+- (−) The dashboard image is large (~800 MB, mostly pandas/pyarrow via Streamlit).

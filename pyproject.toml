@@ -32,6 +32,8 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+# First-party code roots, for import sorting: the backend and the dashboard (frontend/).
+src = ["src", "frontend"]
 
 [tool.ruff.lint]
 # E/F: pycodestyle + pyflakes basics, I: import sorting, B: bugbear (likely bugs),

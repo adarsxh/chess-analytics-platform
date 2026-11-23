@@ -9,7 +9,7 @@
 #
 # Isolated from the development stack, so both can run at once and `down -v` can never
 # delete development data: its own project name (hence its own containers, network and
-# database volume), no host port for its database, and the API on port 18000.
+# database volume), no host port for its database, the API on 18000, the dashboard on 18501.
 
 name: chess-analytics-e2e
 
@@ -20,6 +20,10 @@ services:
   api:
     ports: !override
       - "127.0.0.1:18000:8000"
+
+  dashboard:
+    ports: !override
+      - "127.0.0.1:18501:8501"
 
   chesscom-stub:
     image: python:3.13-slim

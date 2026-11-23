@@ -137,6 +137,21 @@ versioned under `/api/v1`; `/health` and `/health/ready` are not.
 All `stats` endpoints accept `time_class`, `since` and `until` (dates, inclusive, UTC).
 Accuracy is this project's own (ADR-026), so it differs from Chess.com's.
 
+## Dashboard
+
+A Streamlit app in `frontend/` (its own project and image; it reaches the backend only
+through the API, ADR-005 / ADR-027). Pick a player and optional time class / dates in the
+sidebar to see results, rating history, openings and accuracy (with how many games are
+analysed).
+
+```bash
+docker compose up --build            # whole stack; dashboard at http://127.0.0.1:8501
+# or natively, with the API running on :8000:
+cd frontend && uv sync && uv run streamlit run app.py
+```
+
+`CHESS_DASHBOARD_API_URL` points it at another API (default `http://127.0.0.1:8000`).
+
 ## Database migrations
 
 The schema is managed by [Alembic](https://alembic.sqlalchemy.org/). Migrations run as an
@@ -160,7 +175,8 @@ uv run pytest                    # unit + engine tests; integration tests are sk
 CHESS_TEST_DATABASE_URL=postgresql+psycopg://chess:change-me@localhost:5432/chess_analytics \
   uv run pytest -m integration   # integration tests against the compose Postgres
 uv run pytest -m live            # opt-in: smoke test against the real Chess.com API
-uv run ruff check . && uv run ruff format --check .
+uv run ruff check . && uv run ruff format --check .   # lints frontend/ too
+(cd frontend && uv run pytest)   # dashboard: API client, tables, pages (Streamlit AppTest)
 ```
 
 Live tests are excluded by default and never run in CI; all other tests use mocked HTTP
@@ -170,12 +186,13 @@ the pinned version and requires them.
 
 End-to-end tests run the whole stack in Docker, with Chess.com replaced by a local stub
 and a real Stockfish analysing the synced games (CI runs them on every PR). The e2e stack
-is a separate compose project (`chess-analytics-e2e`, API on port 18000), so it runs
+is a separate compose project (`chess-analytics-e2e`, API on 18000, dashboard on 18501), so it runs
 alongside your development stack and its `down -v` only removes its own database:
 
 ```bash
 docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example up -d --build --wait
 uv run pytest -m e2e
+(cd frontend && uv run pytest -m e2e)   # dashboard pages against the real e2e API
 docker compose -f compose.yaml -f tests/e2e/compose.yaml --env-file .env.example down -v
 ```
 
@@ -197,9 +214,10 @@ gh pr merge --squash --delete-branch
 
 ```
 src/chess_analytics/   application package (one subpackage per component)
-tests/                 unit and integration tests
-compose.yaml           local stack: Postgres + API
-Dockerfile             multi-stage API image
+tests/                 unit, integration, engine and e2e tests
+frontend/              Streamlit dashboard: separate project, image and tests
+compose.yaml           local stack: Postgres, migrate, API, worker, dashboard
+Dockerfile             multi-stage API / worker image (includes Stockfish)
 alembic.ini            Alembic config (DB URL comes from settings)
 migrations/            schema migrations (versions/ = history)
 src/…/storage/models/  table definitions, one module per Postgres schema
