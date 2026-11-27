@@ -12,7 +12,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from chess_analytics.storage.schema import OPS, Base, IdMixin, TimestampsMixin, one_of
 
-JOB_STATUSES = ("queued", "running", "succeeded", "failed")
+JOB_TYPES = ("sync_player", "analyse_game", "analyse_player")
+# cancelled: a queued job someone withdrew before it ran (e.g. "Stop" on a bulk analysis).
+JOB_STATUSES = ("queued", "running", "succeeded", "failed", "cancelled")
 ACTIVE_JOB_STATUSES = ("queued", "running")
 # The dedup index's predicate, as literal SQL. ON CONFLICT must repeat it, and with bind
 # parameters instead of literals Postgres can't match it to the index once the statement
@@ -23,7 +25,7 @@ ACTIVE_JOB_PREDICATE = "status IN ('queued', 'running')"
 class Job(IdMixin, TimestampsMixin, Base):
     __tablename__ = "jobs"
     __table_args__ = (
-        one_of("job_type", ("sync_player", "analyse_game")),
+        one_of("job_type", JOB_TYPES),
         one_of("status", JOB_STATUSES),
         CheckConstraint("attempts >= 0", name="attempts_non_negative"),
         CheckConstraint("max_attempts >= 1", name="max_attempts_positive"),

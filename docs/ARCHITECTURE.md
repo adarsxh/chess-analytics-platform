@@ -100,7 +100,10 @@ only in that platform's adapter. Adding a new platform means adding
 6. After a successful sync the worker enqueues `analyse_game` jobs (background priority)
    for the player's latest `CHESS_AUTO_ANALYSE_LATEST_N` (20) games not yet analysed;
    any other game is analysed on demand (`POST /api/v1/games/{id}/analysis`, ahead of
-   background work). Only standard chess reaches `core`, so every game is analysable.
+   background work), or all at once with "Analyse all" (`POST
+   /api/v1/players/{username}/analysis`: one job that a worker expands into a bulk-priority
+   job per unanalysed game; ADR-028). Only standard chess reaches `core`, so every game is
+   analysable.
 7. **Analysis layer:** Stockfish evaluates each position. Evaluations and
    classifications are stored under an analysis run that records the engine version
    and full configuration.

@@ -21,8 +21,10 @@ from chess_analytics.ingestion.base import GameSource, PlayerNotFoundError
 from chess_analytics.ingestion.chesscom.client import ChessComClient
 from chess_analytics.services.analyse import (
     ANALYSE_JOB_TYPE,
+    ANALYSE_PLAYER_JOB_TYPE,
     GameNotFoundError,
     analyse_game,
+    queue_all_for_analysis,
     queue_latest_for_analysis,
 )
 from chess_analytics.services.sync import SYNC_JOB_TYPE, SyncSummary, sync_player
@@ -115,6 +117,26 @@ def handle_analyse_game(
         raise RetryableJobError(f"engine failed: {exc}") from exc
 
 
+def handle_analyse_player(
+    payload: Mapping[str, Any], *, session_factory: sessionmaker[Session], engines: EngineHolder
+) -> None:
+    """ "Analyse all": queue a bulk analysis of every game this worker's engine config
+    hasn't analysed. Needs the engine only for its identity (version and settings)."""
+    platform, username = payload.get("platform"), payload.get("username")
+    if not platform or not username:
+        raise PermanentJobError(f"invalid analyse_player payload: {dict(payload)}")
+    try:
+        queued = queue_all_for_analysis(
+            platform=platform, username=username, engine=engines.get(),
+            session_factory=session_factory,
+        )  # fmt: skip
+    except EngineError as exc:
+        engines.discard()
+        raise RetryableJobError(f"engine failed: {exc}") from exc
+    if queued is None:
+        raise PermanentJobError(f"player not found: {username}")
+
+
 def queue_auto_analysis(
     summary: SyncSummary,
     *,
@@ -159,6 +181,9 @@ def build_handlers(
             on_synced=on_synced,
         ),
         ANALYSE_JOB_TYPE: lambda payload: handle_analyse_game(
+            payload, session_factory=session_factory, engines=engines
+        ),
+        ANALYSE_PLAYER_JOB_TYPE: lambda payload: handle_analyse_player(
             payload, session_factory=session_factory, engines=engines
         ),
     }

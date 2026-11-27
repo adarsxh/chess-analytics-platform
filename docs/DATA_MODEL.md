@@ -264,14 +264,14 @@ the label CHECK was added in migration 0004.
 | Column | Type | Notes |
 |---|---|---|
 | id | bigint PK | |
-| job_type | text | `sync_player` \| `analyse_game` |
+| job_type | text | `sync_player` \| `analyse_game` \| `analyse_player` (ADR-028) |
 | payload | jsonb | Job parameters |
-| status | text | `queued` \| `running` \| `succeeded` \| `failed` |
-| priority | smallint | Lower runs first; on-demand analysis is placed ahead of auto-analysis |
+| status | text | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` (withdrawn while queued, ADR-028) |
+| priority | smallint | Lower runs first: 100 on demand, 200 auto-analysis after a sync, 300 bulk ("Analyse all") |
 | attempts, max_attempts | smallint | |
 | run_after | timestamptz | Retry backoff |
 | locked_by, locked_until | text, timestamptz, nullable | Lease; expired lease = reclaimable |
-| dedup_key | text, nullable | e.g. `sync:chesscom:<username>`, `analyse:<game_id>` (ADR-025) |
+| dedup_key | text, nullable | e.g. `sync:chesscom:<username>`, `analyse:<game_id>` (ADR-025), `analyse_all:chesscom:<username>` (ADR-028) |
 | last_error | text, nullable | |
 | created_at, started_at, finished_at, updated_at | timestamptz | |
 

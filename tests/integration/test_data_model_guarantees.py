@@ -233,6 +233,20 @@ def test_a_running_job_must_hold_a_lease(session: Session) -> None:
         add(session, Job(job_type="analyse_game", status="running"))
 
 
+def test_job_types_and_statuses_are_a_fixed_set(session: Session) -> None:
+    # Phase 9 (ADR-028) added "Analyse all" requests and withdrawn ("cancelled") jobs.
+    add(session, Job(job_type="analyse_player", status="cancelled", dedup_key="analyse_all:x"))
+    with violates(session, "ck_jobs_job_type"):
+        add(session, Job(job_type="mine_bitcoin"))
+    with violates(session, "ck_jobs_status"):
+        add(session, Job(job_type="sync_player", status="paused"))
+
+
+def test_a_cancelled_job_does_not_block_new_work(session: Session) -> None:
+    add(session, Job(job_type="analyse_game", status="cancelled", dedup_key="analyse:1"))
+    add(session, Job(job_type="analyse_game", dedup_key="analyse:1"))
+
+
 # --------------------------------------------------------- allowed values ---
 
 

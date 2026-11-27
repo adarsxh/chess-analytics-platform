@@ -18,7 +18,7 @@ from chess_analytics.api.app import create_app
 from chess_analytics.api.dependencies import get_session_factory
 from chess_analytics.domain.game import Color, GameResult, Outcome, ParsedPlayer, TimeClass
 from chess_analytics.engine.base import EngineError
-from chess_analytics.services.analyse import analyse_game
+from chess_analytics.services.analyse import analyse_game, queue_all_for_analysis
 from chess_analytics.storage.models.core import Game
 from chess_analytics.storage.repositories.core import CoreRepository
 from chess_analytics.storage.repositories.players import PlayerRepository
@@ -226,6 +226,43 @@ def test_analysis_of_an_unknown_game_is_404(client: TestClient) -> None:
     assert client.post("/api/v1/games/999999999/analysis").status_code == 404
     response = client.get("/api/v1/games/999999999/analysis")
     assert (response.status_code, response.json()["detail"]) == (404, "game 999999999 not found")
+
+
+def test_analyse_all_queue_progress_and_stop(client: TestClient, session_factory) -> None:
+    games = [add_game(session_factory, minutes_ago=n) for n in (1, 2, 3)]
+    analyse_game(games[0], engine=FakeEngine(), session_factory=session_factory)
+    url = "/api/v1/players/adarsxh1/analysis"
+
+    response = client.post(url)
+    again = client.post("/api/v1/players/ADARSXH1/analysis").json()
+
+    assert response.status_code == 202
+    body = response.json()
+    assert (body["job_type"], body["status"], body["created"]) == (
+        "analyse_player", "queued", True,
+    )  # fmt: skip
+    assert response.headers["location"] == f"/api/v1/jobs/{body['job_id']}"
+    assert (again["job_id"], again["created"]) == (body["job_id"], False)
+    assert client.get(url).json() == {
+        "total_games": 3, "analysed_games": 1, "queued": 0, "running": 0, "expanding": True,
+    }  # fmt: skip
+
+    queue_all_for_analysis(platform="chesscom", username="adarsxh1", engine=FakeEngine(),
+                           session_factory=session_factory)  # what the worker does  # fmt: skip
+    assert client.get(url).json()["queued"] == 2
+
+    stopped = client.delete(url)
+    assert (stopped.status_code, stopped.json()) == (200, {"cancelled": 2})
+    assert client.get(url).json() == {
+        "total_games": 3, "analysed_games": 1, "queued": 0, "running": 0, "expanding": False,
+    }  # fmt: skip
+    assert client.get(f"/api/v1/jobs/{body['job_id']}").json()["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("method", ["get", "post", "delete"])
+def test_analyse_all_of_an_unknown_player_is_404(client: TestClient, method: str) -> None:
+    response = client.request(method, "/api/v1/players/nobody_here/analysis")
+    assert response.status_code == 404
 
 
 def test_a_game_never_analysed_is_404_with_a_hint(client: TestClient, session_factory) -> None:

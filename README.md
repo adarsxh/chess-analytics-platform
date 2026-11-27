@@ -97,9 +97,12 @@ next to the old one. A game whose moves changed since its analysis is analysed a
 
 The worker does this automatically: after each sync it queues the player's 20 newest
 unanalysed games (`CHESS_AUTO_ANALYSE_LATEST_N`, 0 = off) as background work, and
-`POST /api/v1/games/{id}/analysis` queues any other game ahead of that. One worker
-analyses ~20 games in ~13 minutes on an Apple M-series core; each extra worker adds a
-core (`docker compose up --scale worker=4` ≈ 3–4 minutes).
+`POST /api/v1/games/{id}/analysis` queues any other game ahead of that. Older games are
+analysed only on request: `POST /api/v1/players/{username}/analysis` ("Analyse all")
+queues every game not yet analysed behind all other work, and `DELETE` on the same URL
+stops it (queued games are withdrawn; running ones finish). One worker analyses ~20 games
+in ~13 minutes on an Apple M-series core; each extra worker adds a core
+(`docker compose up --scale worker=4` ≈ 3–4 minutes).
 
 ## Background worker
 
@@ -124,7 +127,7 @@ versioned under `/api/v1`; `/health` and `/health/ready` are not.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/v1/players/{username}/sync` | Queue a sync → `202` + job (duplicates return the same job) |
-| GET | `/api/v1/jobs/{job_id}` | Job status: queued / running / succeeded / failed |
+| GET | `/api/v1/jobs/{job_id}` | Job status: queued / running / succeeded / failed / cancelled |
 | GET | `/api/v1/players/{username}` | Profile and win/loss/draw record |
 | GET | `/api/v1/players/{username}/games` | Games, newest first: `limit`, `offset`, `time_class`, `outcome`, `rated` |
 | GET | `/api/v1/games/{game_id}` | One game with both sides and moves (`include_moves=false` to skip) |
@@ -134,6 +137,9 @@ versioned under `/api/v1`; `/health` and `/health/ready` are not.
 | GET | `/api/v1/players/{username}/stats/accuracy` | Accuracy and errors per analysed game, with coverage |
 | POST | `/api/v1/games/{game_id}/analysis` | Queue a Stockfish analysis → `202` + job (duplicates return the same job) |
 | GET | `/api/v1/games/{game_id}/analysis` | Evaluation of every position and a label for every move (`404` until analysed) |
+| POST | `/api/v1/players/{username}/analysis` | "Analyse all": queue every game not yet analysed, behind other work → `202` + job |
+| GET | `/api/v1/players/{username}/analysis` | Analysis progress: total, analysed, queued and running games |
+| DELETE | `/api/v1/players/{username}/analysis` | Stop "Analyse all": withdraw its queued games (running ones finish) |
 
 All `stats` endpoints accept `time_class`, `since` and `until` (dates, inclusive, UTC).
 Accuracy is this project's own (ADR-026), so it differs from Chess.com's.
