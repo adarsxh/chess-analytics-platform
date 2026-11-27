@@ -86,7 +86,10 @@ chosen AS (
     WHERE ga.status = 'succeeded' AND ga.moves_hash = m.moves_hash
     ORDER BY ga.game_id, ga.analysis_config_id DESC
 ),
-labelled AS (
+-- MATERIALIZED: computed once. Inlined, Postgres estimates 1 row for this grouping and
+-- then re-runs everything joined to it once per analysed game: 24 s at 418 games, growing
+-- with the square of the count (found on real data, 2026-11-28).
+labelled AS MATERIALIZED (
     SELECT c.game_id, c.analysis_id, max(mc.classifier_version) AS classifier_version
     FROM chosen AS c
     JOIN analysis.move_classifications AS mc ON mc.game_analysis_id = c.analysis_id
@@ -212,7 +215,7 @@ LIMIT :limit
             text(f"""
 WITH {cte},
 {_CHOSEN_ANALYSES},
-player_moves AS (
+player_moves AS MATERIALIZED (  -- computed once, see `labelled`
     -- The player's own moves: odd plies are made by the side to move in the start position.
     SELECT l.game_id, mc.label,
            greatest(0, least(100, :acc_scale * exp(-:acc_decay * mc.eval_loss) + :acc_offset))
