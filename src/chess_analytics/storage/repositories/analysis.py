@@ -89,12 +89,18 @@ class AnalysisRepository:
         return self._session.get(Game, game_id) is not None
 
     def latest_games_needing_analysis(
-        self, player_id: int, *, config_id: int, limit: int, among_latest: int | None = None
+        self,
+        player_id: int,
+        *,
+        config_id: int,
+        limit: int | None,
+        among_latest: int | None = None,
     ) -> list[int]:
         """The player's newest games without a fresh, successful analysis by this config.
 
         With `among_latest=N`, only the player's N newest games are considered (the
         auto-analysis window, ADR-004); without it, the search goes back through history.
+        `limit=None` returns all of them ("Analyse all", ADR-028).
         """
         fresh = (
             select(GameAnalysis.id)
@@ -117,6 +123,32 @@ class AnalysisRepository:
             window = players_games.order_by(*newest_first).limit(among_latest)
             query = query.where(Game.id.in_(window))
         return list(self._session.scalars(query.order_by(*newest_first).limit(limit)))
+
+    def player_game_ids(self, player_id: int) -> list[int]:
+        return list(
+            self._session.scalars(
+                select(GamePlayer.game_id).where(GamePlayer.player_id == player_id)
+            )
+        )
+
+    def count_fresh_analysed(self, player_id: int) -> int:
+        """The player's games with a fresh, successful analysis by any config (the same
+        games the stats count as analysed)."""
+        fresh = (
+            select(GameAnalysis.id)
+            .where(
+                GameAnalysis.game_id == Game.id,
+                GameAnalysis.status == "succeeded",
+                GameAnalysis.moves_hash == Game.moves_hash,
+            )
+            .exists()
+        )
+        return self._session.scalar(
+            select(func.count())
+            .select_from(Game)
+            .join(GamePlayer, GamePlayer.game_id == Game.id)
+            .where(GamePlayer.player_id == player_id, fresh)
+        )
 
     # -------------------------------------------------------------- analyses ---
 

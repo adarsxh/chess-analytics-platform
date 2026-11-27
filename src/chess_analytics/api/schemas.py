@@ -17,7 +17,7 @@ USERNAME_PATTERN = r"^[A-Za-z0-9_-]{1,50}$"  # Chess.com usernames
 Platform = Literal["chesscom"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
 Outcome = Literal["win", "loss", "draw"]
-JobStatus = Literal["queued", "running", "succeeded", "failed"]
+JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 
 # ------------------------------------------------------------------- jobs ---
@@ -61,6 +61,26 @@ class AnalysisRequestedResponse(JobResponse):
     created: bool = Field(
         description="False if an analysis of this game was already queued or running"
     )
+
+
+class AnalyseAllRequestedResponse(JobResponse):
+    created: bool = Field(
+        description='False if an "Analyse all" of this player was already queued or running'
+    )
+
+
+class AnalysisProgressResponse(BaseModel):
+    total_games: int
+    analysed_games: int = Field(description="Games with a fresh analysis (what the stats use)")
+    queued: int = Field(description="Game analyses waiting for a worker")
+    running: int = Field(description="Game analyses in progress")
+    expanding: bool = Field(
+        description='An "Analyse all" request is still being turned into game analyses'
+    )
+
+
+class AnalyseAllCancelledResponse(BaseModel):
+    cancelled: int = Field(description="Queued game analyses withdrawn")
 
 
 # ---------------------------------------------------------------- players ---

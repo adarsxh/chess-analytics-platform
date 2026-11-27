@@ -16,10 +16,14 @@ moves change later, the next run re-analyses it in place.
 Queueing (ADR-025): `analyse_game` jobs carry only the game id, deduplicated per game.
 The engine config is chosen by the worker that runs the job, because only a running
 engine knows its exact version.
+
+"Analyse all" (ADR-028): one `analyse_player` job, which a worker expands into an
+`analyse_game` job (bulk priority) for each of the player's games its config hasn't
+analysed. "Stop" cancels the bulk jobs still queued; running ones finish.
 """
 
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 
 import structlog
@@ -35,6 +39,7 @@ from chess_analytics.storage.repositories.analysis import (
 )
 from chess_analytics.storage.repositories.jobs import (
     PRIORITY_BACKGROUND,
+    PRIORITY_BULK,
     PRIORITY_ON_DEMAND,
     JobRepository,
 )
@@ -43,6 +48,7 @@ from chess_analytics.storage.repositories.queries import GameQueries
 log = structlog.get_logger(__name__)
 
 ANALYSE_JOB_TYPE = "analyse_game"
+ANALYSE_PLAYER_JOB_TYPE = "analyse_player"
 
 
 class GameNotFoundError(Exception):
@@ -168,9 +174,108 @@ def queue_latest_for_analysis(
     return game_ids
 
 
+# ------------------------------------------------------------ analyse all ---
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisProgress:
+    total_games: int
+    analysed_games: int  # fresh analysis by any config: what the stats count
+    queued: int  # analyse_game jobs waiting, of any priority
+    running: int  # analyse_game jobs being analysed now
+    expanding: bool  # an "Analyse all" request that no worker has expanded yet
+
+    def as_dict(self) -> dict[str, int | bool]:
+        return asdict(self)
+
+
+def request_analyse_all(
+    session_factory: sessionmaker[Session], *, platform: str, username: str
+) -> tuple[int, bool] | None:
+    """Queue the `analyse_player` job ("Analyse all"). Returns (job_id, created), or None
+    if the player is unknown. Deduplicated per player like a sync. It runs ahead of other
+    work (it only queues jobs, in about a second), so progress shows the backlog at once."""
+    with session_factory.begin() as session:
+        if GameQueries(session).find_player(platform=platform, username=username) is None:
+            return None
+        job, created = JobRepository(session).enqueue(
+            ANALYSE_PLAYER_JOB_TYPE,
+            {"platform": platform, "username": username},
+            dedup_key=_analyse_all_key(platform, username),
+        )
+        return job.id, created
+
+
+def queue_all_for_analysis(
+    *, platform: str, username: str, engine: Engine, session_factory: sessionmaker[Session]
+) -> list[int] | None:
+    """Run by the worker for `analyse_player`: queue a bulk `analyse_game` job for every
+    game of the player this engine's config hasn't analysed, newest first. Games already
+    queued keep their job (and its higher priority). None if the player is unknown."""
+    with session_factory.begin() as session:
+        player = GameQueries(session).find_player(platform=platform, username=username)
+        if player is None:
+            return None
+        player_id = player.id  # the row expires when the transaction commits
+        repo = AnalysisRepository(session)
+        config_id = repo.get_or_create_config(engine.identity, engine.settings).id
+        game_ids = repo.latest_games_needing_analysis(player_id, config_id=config_id, limit=None)
+        jobs = JobRepository(session)
+        for game_id in game_ids:
+            _enqueue(jobs, game_id, PRIORITY_BULK)
+    log.info("bulk_analysis_queued", player_id=player_id, games=len(game_ids))
+    return game_ids
+
+
+def cancel_analyse_all(
+    session_factory: sessionmaker[Session], *, platform: str, username: str
+) -> int | None:
+    """ "Stop": cancel the player's bulk analyses still queued, and an "Analyse all" not yet
+    expanded. Running analyses finish; on-demand and after-sync analyses are kept (they
+    have another priority). Returns how many game analyses were withdrawn, or None if the
+    player is unknown."""
+    with session_factory.begin() as session:
+        player = GameQueries(session).find_player(platform=platform, username=username)
+        if player is None:
+            return None
+        player_id = player.id
+        jobs = JobRepository(session)
+        jobs.cancel_queued([_analyse_all_key(platform, username)])
+        game_ids = AnalysisRepository(session).player_game_ids(player_id)
+        cancelled = jobs.cancel_queued(
+            [_analyse_key(game_id) for game_id in game_ids], priority=PRIORITY_BULK
+        )
+    log.info("bulk_analysis_cancelled", player_id=player_id, games=cancelled)
+    return cancelled
+
+
+def analysis_progress(
+    session: Session, *, player_id: int, platform: str, username: str
+) -> AnalysisProgress:
+    repo, jobs = AnalysisRepository(session), JobRepository(session)
+    game_ids = repo.player_game_ids(player_id)
+    active = jobs.count_active([_analyse_key(game_id) for game_id in game_ids])
+    expanding = sum(jobs.count_active([_analyse_all_key(platform, username)]).values()) > 0
+    return AnalysisProgress(
+        total_games=len(game_ids),
+        analysed_games=repo.count_fresh_analysed(player_id),
+        queued=active["queued"],
+        running=active["running"],
+        expanding=expanding,
+    )
+
+
+def _analyse_key(game_id: int) -> str:
+    return f"analyse:{game_id}"
+
+
+def _analyse_all_key(platform: str, username: str) -> str:
+    return f"analyse_all:{platform}:{username.lower()}"
+
+
 def _enqueue(jobs: JobRepository, game_id: int, priority: int) -> tuple[int, bool]:
     job, created = jobs.enqueue(
-        ANALYSE_JOB_TYPE, {"game_id": game_id}, dedup_key=f"analyse:{game_id}", priority=priority
+        ANALYSE_JOB_TYPE, {"game_id": game_id}, dedup_key=_analyse_key(game_id), priority=priority
     )
     return job.id, created
 

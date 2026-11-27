@@ -916,3 +916,51 @@ pandas, pyarrow and friends (several hundred MB) that the API and worker don't n
 - (+) A change to an API response that breaks the dashboard fails CI.
 - (−) Two projects to keep updated (dependencies, Python version).
 - (−) The dashboard image is large (~800 MB, mostly pandas/pyarrow via Streamlit).
+
+## ADR-028: "Analyse all": a bulk analysis that can be stopped
+
+- **Status:** Accepted · **Date:** 2026-11-28
+
+### Context
+After a sync only the 20 newest games are analysed (ADR-004, ADR-025); the rest of a
+player's history (~2,400 games for the main user, ~7 h on 4 workers) is analysed only when
+asked for. It is a lot of compute, so it must be explicit, stay behind work someone is
+waiting for, and be stoppable. An analysis belongs to an engine config, and only a worker
+knows its engine's exact version (ADR-025).
+
+### Decision
+- **One `analyse_player` job per request**, deduplicated per player
+  (`analyse_all:<platform>:<username>`), queued at on-demand priority. A worker expands it:
+  every game of the player without a fresh analysis by *its* engine config gets an
+  `analyse_game` job, newest first. Games already queued keep their job and priority.
+- **A third priority, bulk (300)**, below on-demand (100) and after-sync (200): a sync during
+  a long bulk run still has its new games analysed first, and opening a game still jumps
+  the queue (re-requesting moves a queued job up, as before).
+- **Stop = a new job status, `cancelled`** (migration 0005). `DELETE` cancels the player's
+  queued bulk jobs and an `analyse_player` job not yet expanded. Running analyses finish;
+  on-demand and after-sync jobs are untouched (they have another priority). `cancelled`
+  is not an active status, so "Analyse all" can be requested again and resumes: analysed
+  games are skipped.
+- **Progress** (`GET`) counts the player's games, those with a fresh analysis (by any
+  config: what the stats show), and analysis jobs queued and running.
+- The queue stays generic: `JobRepository` cancels and counts jobs by dedup keys; which keys
+  belong to a player is decided in the analysis service.
+
+### Alternatives
+- **The API queues every game directly:** no new job type, but the API can't know the
+  worker's engine config, so "already analysed" would ignore it (after a Stockfish upgrade
+  old games would be skipped).
+- **Same priority as after-sync work:** new games would wait hours behind the backlog.
+- **No stop, only stopping the workers:** no code, but the backlog could never be dropped
+  from the dashboard, only paused.
+- **Delete queued jobs instead of a status:** loses the record of what was withdrawn and
+  when.
+
+### Consequences
+- (+) Explicit, stoppable, resumable bulk work that never delays interactive work.
+- (+) Correct across engine upgrades: expansion uses the running worker's config.
+- (−) A Stop pressed while a worker is expanding the request (about a second) misses the
+  jobs that worker is still inserting; the progress shows them, and Stop can be pressed
+  again.
+- (−) Thousands of job rows per player; fine for Postgres, and finished rows can be pruned
+  later.

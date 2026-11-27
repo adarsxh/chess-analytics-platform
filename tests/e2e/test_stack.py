@@ -88,6 +88,20 @@ def test_synced_games_are_analysed_with_stockfish(api: httpx2.Client) -> None:
     assert newest["moves"][-1]["san"] == "Qxf7#"
 
 
+def test_analyse_all_through_the_worker(api: httpx2.Client) -> None:
+    # Both games are analysed above, so the worker's expansion finds nothing left to queue.
+    response = api.post(f"/api/v1/players/{PLAYER}/analysis")
+    assert response.status_code == 202, response.text
+    job = wait_for_job(api, response.json()["job_id"])
+    assert (job["job_type"], job["status"]) == ("analyse_player", "succeeded"), job
+
+    progress = api.get(f"/api/v1/players/{PLAYER}/analysis").json()
+    assert progress == {
+        "total_games": 2, "analysed_games": 2, "queued": 0, "running": 0, "expanding": False,
+    }  # fmt: skip
+    assert api.delete(f"/api/v1/players/{PLAYER}/analysis").json() == {"cancelled": 0}
+
+
 def test_second_sync_is_idempotent(api: httpx2.Client) -> None:
     job = wait_for_job(api, request_sync(api, PLAYER))  # stub answers 304 this time
     assert job["status"] == "succeeded", job

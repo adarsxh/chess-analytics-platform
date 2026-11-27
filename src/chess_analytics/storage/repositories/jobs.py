@@ -1,9 +1,10 @@
 """Postgres-backed job queue (ADR-003, ADR-018, DATA_MODEL.md §4.4).
 
 Lifecycle:  queued ──claim──▶ running ──complete──▶ succeeded
-                ▲                │
-                └──retryable fail┤ (back to queued, run_after = now() + backoff)
-                                 └──final fail / out of attempts──▶ failed
+              │ ▲                │
+              │ └─retryable fail─┤ (back to queued, run_after = now() + backoff)
+              │                  └──final fail / out of attempts──▶ failed
+              └──cancel (only while queued)──▶ cancelled
 
 Concurrency rules, enforced in SQL rather than in Python:
 - claim uses FOR UPDATE SKIP LOCKED: concurrent workers never take the same job and
@@ -15,6 +16,7 @@ Concurrency rules, enforced in SQL rather than in Python:
 - all times come from the database clock (now()), never from worker machines.
 """
 
+from collections.abc import Sequence
 from datetime import timedelta
 from typing import Any
 
@@ -27,9 +29,11 @@ from chess_analytics.storage.models.ops import ACTIVE_JOB_PREDICATE, ACTIVE_JOB_
 RETRY_BASE_SECONDS = 30  # retry delays: 30 s, 2 min, 8 min, ... (x4 per attempt)
 
 # Lower runs first. Work someone is waiting for (a sync, analysing one game) goes ahead
-# of background work (auto-analysis after a sync).
+# of background work (auto-analysis after a sync), which goes ahead of bulk work (the
+# whole history, "Analyse all"), so new games aren't stuck behind a long backlog.
 PRIORITY_ON_DEMAND = 100
 PRIORITY_BACKGROUND = 200
+PRIORITY_BULK = 300
 
 
 def retry_delay(attempt: int) -> timedelta:
@@ -97,6 +101,35 @@ class JobRepository:
         if moved_up:
             self._session.refresh(existing)
         return existing, False
+
+    # ----------------------------------------------------- cancel, inspect ---
+
+    def cancel_queued(self, dedup_keys: Sequence[str], *, priority: int | None = None) -> int:
+        """Cancel the queued jobs with these keys (only those at `priority`, if given).
+        Running jobs are left to finish. Returns how many were cancelled."""
+        if not dedup_keys:
+            return 0
+        conditions = [Job.status == "queued", Job.dedup_key.in_(dedup_keys)]
+        if priority is not None:
+            conditions.append(Job.priority == priority)
+        return self._session.execute(
+            update(Job)
+            .where(*conditions)
+            .values(status="cancelled", finished_at=func.now(), updated_at=func.now())
+            .execution_options(synchronize_session=False)
+        ).rowcount
+
+    def count_active(self, dedup_keys: Sequence[str]) -> dict[str, int]:
+        """How many jobs with these keys are queued and running: {"queued": n, "running": m}."""
+        counts = dict.fromkeys(ACTIVE_JOB_STATUSES, 0)
+        if dedup_keys:
+            rows = self._session.execute(
+                select(Job.status, func.count())
+                .where(Job.status.in_(ACTIVE_JOB_STATUSES), Job.dedup_key.in_(dedup_keys))
+                .group_by(Job.status)
+            )
+            counts.update({status: count for status, count in rows})
+        return counts
 
     # ------------------------------------------------------------------ claim ---
 
