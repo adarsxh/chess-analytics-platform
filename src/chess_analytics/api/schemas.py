@@ -282,6 +282,10 @@ class GameQuality(BaseModel):
     blunders: int
 
 
+class MonthlyQuality(Coverage, QualitySummary):
+    month: date = Field(description="First day of the calendar month (UTC)")
+
+
 class AccuracyStats(BaseModel):
     coverage: Coverage
     summary: QualitySummary

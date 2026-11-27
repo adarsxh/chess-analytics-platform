@@ -44,6 +44,22 @@ def accuracy_frame(games: list[dict[str, Any]]) -> pd.DataFrame:
     return frame.sort_values("end_time", ignore_index=True)
 
 
+ERROR_KINDS = ["inaccuracies", "mistakes", "blunders"]
+
+
+def monthly_frame(months: list[dict[str, Any]]) -> pd.DataFrame:
+    """One row per month with at least one analysed game, oldest first. Months without
+    analysed games have no accuracy, so they are left out rather than drawn as zero."""
+    per_game = [f"{kind}_per_game" for kind in ERROR_KINDS]
+    columns = ["month", "total_games", "analysed_games", "accuracy", *per_game]
+    frame = pd.DataFrame(months, columns=columns)
+    frame = frame[frame["analysed_games"] > 0].copy()
+    frame["month"] = pd.to_datetime(frame["month"])
+    for column in ("accuracy", *per_game):
+        frame[column] = pd.to_numeric(frame[column])
+    return frame.sort_values("month", ignore_index=True)
+
+
 EVAL_CLAMP = 10  # pawns; beyond this the game is decided and the chart would flatten
 LABEL_SYMBOLS = {"blunder": "??", "mistake": "?", "inaccuracy": "?!", "best": "★",
                  "excellent": "!", "good": "", "forced": "□"}  # fmt: skip
