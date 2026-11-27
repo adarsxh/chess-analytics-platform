@@ -35,10 +35,28 @@ STATS = {
 EMPTY = {"total": {**RECORD, "games": 0}, "by_time_class": {}, "by_color": {}}
 
 
+IDLE = {"total_games": 2, "analysed_games": 1, "queued": 0, "running": 0, "expanding": False}
+BUSY = {"total_games": 2, "analysed_games": 1, "queued": 1, "running": 0, "expanding": False}
+
+
 class FakeApi:
     def __init__(self, known: set[str]) -> None:
         self.known, self.calls = known, []
         self.overview = STATS["overview"]
+        self.progress, self.posted = IDLE, []
+
+    def analysis_progress(self, username: str) -> dict:
+        return self.progress
+
+    def request_analyse_all(self, username: str) -> dict:
+        self.posted.append(f"analyse_all:{username}")
+        self.progress = BUSY
+        return {"job_id": 1}
+
+    def stop_analyse_all(self, username: str) -> dict:
+        self.posted.append(f"stop:{username}")
+        self.progress = IDLE
+        return {"cancelled": 1}
 
     def stats(self, username: str, view: str, params: dict) -> object:
         self.calls.append((username, view, params))
@@ -153,6 +171,32 @@ def test_accuracy_page_shows_error_rates_and_games(fake_api: FakeApi) -> None:
     assert "Covers 1 of 2 games (50.0 %)" in app.caption[0].value
     assert len(app.get("vega_lite_chart")) == 1
     assert views(fake_api) == {"overview", "accuracy"}
+
+
+def test_analyse_all_starts_shows_progress_and_stops(fake_api: FakeApi) -> None:
+    app = run("me", page=accuracy_script)
+    assert app.get("progress")[0].proto.text == "1 of 2 games analysed (50%)"
+    start = next(b for b in app.button if b.label.startswith("Analyse all"))
+    assert start.label == "Analyse all 1 remaining games"
+
+    start.click().run()
+
+    assert fake_api.posted == ["analyse_all:me"]
+    assert any("1 waiting · 0 being analysed now" in c.value for c in app.caption)
+    stop = next(b for b in app.button if b.label == "Stop")
+
+    stop.click().run()
+
+    assert fake_api.posted == ["analyse_all:me", "stop:me"]
+    assert app.success[0].value.startswith("Stopped: 1 games withdrawn")
+    assert [b.label for b in app.button] == ["Analyse all 1 remaining games"]
+
+
+def test_nothing_left_to_analyse(fake_api: FakeApi) -> None:
+    fake_api.progress = {**IDLE, "analysed_games": 2}
+    app = run("me", page=accuracy_script)
+    assert "Every game is analysed." in [c.value for c in app.caption]
+    assert len(app.button) == 0
 
 
 def test_sidebar_groups_statistics_and_games() -> None:

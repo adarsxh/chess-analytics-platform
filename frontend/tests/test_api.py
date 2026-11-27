@@ -42,6 +42,14 @@ def test_posts_for_sync_and_analysis() -> None:
     ]
 
 
+def test_analyse_all_request_progress_and_stop() -> None:
+    api, seen = client_for(lambda r: httpx2.Response(200, json={"ok": r.method}))
+    assert api.request_analyse_all("me") == {"ok": "POST"}
+    assert api.analysis_progress("me") == {"ok": "GET"}
+    assert api.stop_analyse_all("me") == {"ok": "DELETE"}
+    assert {r.url.path for r in seen} == {"/api/v1/players/me/analysis"}
+
+
 def test_404_is_not_found_with_the_api_detail() -> None:
     api, _ = client_for(lambda r: httpx2.Response(404, json={"detail": "player 'x' not found"}))
     with pytest.raises(NotFound, match="player 'x' not found"):
