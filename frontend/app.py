@@ -32,4 +32,4 @@ with st.sidebar:
         jobs.start(SYNC_JOB, lambda: session.client().request_sync(selected.username))
         st.rerun()
 
-st.navigation([navigation.STATS, navigation.GAMES, navigation.GAME]).run()
+st.navigation(navigation.SECTIONS).run()
