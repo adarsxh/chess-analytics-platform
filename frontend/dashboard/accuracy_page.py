@@ -3,6 +3,7 @@
 import altair as alt
 import streamlit as st
 
+from dashboard import analyse_all
 from dashboard.stats import load, time_axis
 from dashboard.tables import accuracy_frame
 
@@ -13,6 +14,8 @@ def render() -> None:
         return
     accuracy = loaded["accuracy"]
     _summary(accuracy)
+    analyse_all.show_stopped()
+    analyse_all.render(loaded.username)
     _per_game(accuracy)
 
 
@@ -33,8 +36,9 @@ def _summary(accuracy: dict) -> None:
         column.metric(label, summary[key] or "–")
     st.caption(
         f"Covers {coverage['analysed_games']:,} of {coverage['total_games']:,} games "
-        f"({coverage['percent']} %): only analysed games have engine statistics. The latest "
-        "20 are analysed after each sync; open any other game to analyse it."
+        f"({coverage['percent']} %) matching the filters: only analysed games have engine "
+        "statistics. The latest 20 are analysed after each sync; older ones below, or one at "
+        "a time from the game page."
     )
 
 

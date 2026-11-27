@@ -57,6 +57,18 @@ class ApiClient:
             params["time_class"] = time_class
         return self._get(f"/api/v1/players/{username}/games", params)
 
+    def analysis_progress(self, username: str) -> dict[str, Any]:
+        """How many of the player's games are analysed, queued and running."""
+        return self._get(f"/api/v1/players/{username}/analysis")
+
+    def request_analyse_all(self, username: str) -> dict[str, Any]:
+        """ "Analyse all": queue every game not yet analysed, behind other work (ADR-028)."""
+        return self._request("POST", f"/api/v1/players/{username}/analysis")
+
+    def stop_analyse_all(self, username: str) -> dict[str, Any]:
+        """Withdraw the queued games of an "Analyse all"; running analyses finish."""
+        return self._request("DELETE", f"/api/v1/players/{username}/analysis")
+
     # ------------------------------------------------------------------ stats ---
 
     def stats(self, username: str, view: str, params: dict[str, Any]) -> Any:

@@ -49,6 +49,7 @@ services:
       CHESS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     ports:
       - "127.0.0.1:${CHESS_API_PORT:-8000}:8000"
+    cpus: 1.0  # requests are short; leave the other cores to the workers
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -61,7 +62,9 @@ services:
 
   worker:
     # Runs queued jobs: syncs and Stockfish analyses. One analysis uses one CPU core, so
-    # scale with `docker compose up --scale worker=4`: SKIP LOCKED keeps workers apart.
+    # each worker is capped at one core, and their number is CHESS_WORKERS in .env (or
+    # `docker compose up --scale worker=8`); SKIP LOCKED keeps them apart. Docker Desktop's
+    # own CPU limit (Settings → Resources) caps all containers together: raise it too.
     build: .
     image: ${CHESS_IMAGE:-chess-analytics:local}  # CI sets CHESS_IMAGE to its built image
     command: ["python", "-m", "chess_analytics.worker"]
@@ -76,6 +79,9 @@ services:
     # ~25 s and an analysis ~40 s, so the current job can finish instead of being killed.
     stop_grace_period: 60s
     restart: unless-stopped
+    cpus: 1.0
+    deploy:
+      replicas: ${CHESS_WORKERS:-1}
 
   dashboard:
     # Streamlit UI (frontend/, its own image). Talks to the API over HTTP only (ADR-005).
@@ -85,6 +91,7 @@ services:
       CHESS_DASHBOARD_API_URL: http://api:8000
     ports:
       - "127.0.0.1:${CHESS_DASHBOARD_PORT:-8501}:8501"
+    cpus: 1.0
     depends_on:
       api:
         condition: service_healthy

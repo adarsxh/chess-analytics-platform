@@ -8,8 +8,8 @@ blunders and mistakes) through an API and a dashboard.
 
 > **Status:** V1 complete. Chess.com ingestion, processing into a clean model, background
 > jobs, an HTTP API, Stockfish analysis with move classification and accuracy, and a
-> Streamlit dashboard (Phases 1–7). V2 in progress: Phase 8 (dashboard pages) done; see
-> the roadmap.
+> Streamlit dashboard (Phases 1–7). V2 in progress: Phase 8 (dashboard pages) and
+> Phase 9 ("Analyse all") done; see the roadmap.
 
 ## Architecture at a glance
 
@@ -114,10 +114,18 @@ uv run python -m chess_analytics.worker               # run a worker (Ctrl+C fin
 uv run python -m chess_analytics request-sync <user>  # queue a sync for it
 ```
 
-In Docker, `docker compose up` starts a worker next to the API; add workers with
-`docker compose up --scale worker=3`. Duplicate requests (same player, same game) return
-the job already queued; failed jobs are retried with backoff (30 s, 2 min, 8 min). The
-worker starts Stockfish on its first analysis and keeps it running for the next ones.
+In Docker, `docker compose up` starts `CHESS_WORKERS` workers (from `.env`, default 1)
+next to the API, each capped at one CPU core (an analysis is single-threaded, so more
+would not help it). For a big "Analyse all", run more: set `CHESS_WORKERS=8` in `.env` (or
+`docker compose up -d --scale worker=8`). Docker Desktop's own limit caps all containers
+together (Settings → Resources → CPUs, default 4 here), so raise it to at least the worker
+count + 2 for the database, API and dashboard. Results don't depend on the core a game ran
+on: the engine stops after a fixed number of nodes, not after a time limit.
+
+Duplicate requests (same player, same game) return the job already queued; failed jobs
+are retried with backoff (30 s, 2 min, 8 min). The worker starts Stockfish on its first
+analysis and keeps it running for the next ones. Stopping workers is safe at any time:
+queued jobs wait in Postgres, and a job cut off mid-analysis is picked up again.
 
 ## API
 
@@ -151,7 +159,8 @@ through the API, ADR-005 / ADR-027). Pick a player and optional time class / dat
 sidebar; they apply to every page. **Statistics** pages: *Overview* (headline numbers,
 results by time class and colour, rating history), *Openings* (results per opening, as White
 and as Black) and *Accuracy* (accuracy, error rates and each analysed game, with how many
-games are analysed). **Games**: the player's games; select one to open it. **Game**: both sides'
+games are analysed, and *Analyse all* / *Stop* for the older games, with live progress).
+**Games**: the player's games; select one to open it. **Game**: both sides'
 accuracy, the evaluation over the game with errors marked, every move with its label, and
 an *Analyse* button for games outside the latest 20. *Sync from Chess.com* in the sidebar
 queues a sync and follows it until it finishes.
@@ -163,6 +172,10 @@ cd frontend && uv sync && uv run streamlit run app.py
 ```
 
 `CHESS_DASHBOARD_API_URL` points it at another API (default `http://127.0.0.1:8000`).
+
+Running containers keep the code they were built with: after pulling or merging changes,
+`docker compose up -d --build` rebuilds what changed and applies new migrations (the
+database volume is kept).
 
 ## Database migrations
 
