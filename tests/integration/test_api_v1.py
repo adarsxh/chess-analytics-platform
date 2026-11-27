@@ -373,7 +373,9 @@ def test_invalid_stats_filters_are_422(client: TestClient, session_factory, quer
     assert client.get(f"/api/v1/players/adarsxh1/stats/overview?{query}").status_code == 422
 
 
-@pytest.mark.parametrize("view", ["overview", "rating-history", "openings", "accuracy"])
+@pytest.mark.parametrize(
+    "view", ["overview", "rating-history", "openings", "accuracy", "accuracy-by-month"]
+)
 def test_stats_of_an_unknown_player_are_404(client: TestClient, view: str) -> None:
     assert client.get(f"/api/v1/players/nobody_here/stats/{view}").status_code == 404
 
@@ -405,6 +407,23 @@ def test_stats_accuracy_with_coverage(client: TestClient, session_factory) -> No
     assert (game["game_id"], game["color"], game["moves"]) == (analysed, "white", 1)
     assert 0 <= float(game["accuracy"]) <= 100
     assert body["summary"]["accuracy"] == game["accuracy"]
+
+
+def test_stats_accuracy_by_month(client: TestClient, session_factory) -> None:
+    analysed = add_game(session_factory, minutes_ago=1)  # both on 31 Oct 2026, UTC
+    add_game(session_factory, minutes_ago=2)
+    analyse_game(analysed, engine=FakeEngine(), session_factory=session_factory)
+    overall = client.get("/api/v1/players/adarsxh1/stats/accuracy").json()["summary"]
+
+    (month,) = client.get("/api/v1/players/adarsxh1/stats/accuracy-by-month").json()
+
+    assert (month["month"], month["total_games"], month["analysed_games"], month["percent"]) == (
+        "2026-10-01", 2, 1, "50.0",
+    )  # fmt: skip
+    assert month["accuracy"] == overall["accuracy"]
+    assert month["blunders_per_game"] == overall["blunders_per_game"]
+    after = client.get("/api/v1/players/adarsxh1/stats/accuracy-by-month?since=2026-11-01")
+    assert after.json() == []
 
 
 def test_business_endpoints_are_versioned_health_is_not(client: TestClient) -> None:

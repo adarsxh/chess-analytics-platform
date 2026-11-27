@@ -63,7 +63,7 @@ def test_openings_and_accuracy_pages_render_real_responses() -> None:
     accuracy.run()
     assert not accuracy.exception and not accuracy.error and not accuracy.warning
     assert "Covers 2 of 2 games" in accuracy.caption[0].value
-    assert len(accuracy.get("vega_lite_chart")) == 1
+    assert len(accuracy.get("vega_lite_chart")) == 3  # by month x2, per game
 
 
 def games_script() -> None:

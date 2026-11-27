@@ -9,7 +9,7 @@ dashboard describe the same set of games.
 """
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -253,6 +253,38 @@ ORDER BY m.end_time DESC, m.game_id DESC
         ).scalar_one()
         return {"coverage": _coverage(len(games), total), "summary": _summary(games),
                 "games": games}  # fmt: skip
+
+    def accuracy_by_month(
+        self, player_id: int, filters: Filters = ALL_GAMES
+    ) -> list[dict[str, Any]]:
+        """One row per calendar month (UTC) with games: its accuracy and error rates over
+        the analysed games, with the same definitions as the summary, and its coverage.
+        Months with games but none analysed have no accuracy (None)."""
+        cte, params = self._player_games(player_id, filters)
+        totals = self._session.execute(
+            text(f"""
+WITH {cte}
+SELECT date_trunc('month', end_time AT TIME ZONE 'UTC')::date AS month, count(*) AS games
+FROM player_games GROUP BY 1 ORDER BY 1
+"""),
+            params,
+        ).all()
+        analysed: dict[date, list[dict[str, Any]]] = {}
+        for game in self.game_quality(player_id, filters)["games"]:
+            analysed.setdefault(_utc_month(game["end_time"]), []).append(game)
+        return [
+            {
+                "month": row.month,
+                **_coverage(len(analysed.get(row.month, [])), row.games),
+                **_summary(analysed.get(row.month, [])),
+            }
+            for row in totals
+        ]
+
+
+def _utc_month(moment: datetime) -> date:
+    utc = moment.astimezone(UTC)
+    return date(utc.year, utc.month, 1)
 
 
 def _coverage(analysed: int, total: int) -> dict[str, Any]:

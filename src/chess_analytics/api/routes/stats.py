@@ -1,4 +1,5 @@
-"""Player statistics (ADR-026): results, rating history, openings, accuracy.
+"""Player statistics (ADR-026): results, rating history, openings, accuracy (per game and
+per month).
 
 Every endpoint takes the same filters, so a dashboard showing several of them describes
 one consistent set of games. Accuracy and error statistics include their coverage: how
@@ -15,6 +16,7 @@ from chess_analytics.api.dependencies import SessionDep
 from chess_analytics.api.routes.players import PlatformParam, Username, player_or_404
 from chess_analytics.api.schemas import (
     AccuracyStats,
+    MonthlyQuality,
     OpeningStats,
     OverviewStats,
     RatingPoint,
@@ -95,3 +97,19 @@ def accuracy(
 ) -> AccuracyStats:  # fmt: skip
     player_id = _player_id(session, username, platform)
     return AccuracyStats(**PlayerAnalytics(session).game_quality(player_id, filters))
+
+
+@router.get(
+    "/accuracy-by-month",
+    response_model=list[MonthlyQuality],
+    summary="Accuracy and errors per calendar month, with each month's coverage",
+)
+def accuracy_by_month(
+    username: Username, session: SessionDep, filters: FiltersDep,
+    platform: PlatformParam = "chesscom",
+) -> list[MonthlyQuality]:  # fmt: skip
+    """Every month with games (UTC), oldest first. A month's accuracy is the mean of its
+    analysed games' accuracies, as in `/accuracy`; `analysed_games` says how many that is."""
+    player_id = _player_id(session, username, platform)
+    rows = PlayerAnalytics(session).accuracy_by_month(player_id, filters)
+    return [MonthlyQuality(**row) for row in rows]

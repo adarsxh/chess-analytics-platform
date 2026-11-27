@@ -29,6 +29,14 @@ STATS = {
                    "source_accuracy": "70.1", "moves": 30, "inaccuracies": 2,
                    "mistakes": 0, "blunders": 1}],
     },
+    "accuracy-by-month": [
+        {"month": "2026-10-01", "total_games": 3, "analysed_games": 0, "percent": "0.0",
+         "accuracy": None, "inaccuracies_per_game": None, "mistakes_per_game": None,
+         "blunders_per_game": None},
+        {"month": "2026-11-01", "total_games": 2, "analysed_games": 1, "percent": "50.0",
+         "accuracy": "78.4", "inaccuracies_per_game": "2.00", "mistakes_per_game": "0.00",
+         "blunders_per_game": "1.00"},
+    ],
 }  # fmt: skip
 
 
@@ -169,8 +177,11 @@ def test_accuracy_page_shows_error_rates_and_games(fake_api: FakeApi) -> None:
         "Mistakes / game": "0.00", "Blunders / game": "1.00",
     }  # fmt: skip
     assert "Covers 1 of 2 games (50.0 %)" in app.caption[0].value
-    assert len(app.get("vega_lite_chart")) == 1
-    assert views(fake_api) == {"overview", "accuracy"}
+    assert len(app.get("vega_lite_chart")) == 3  # by month: accuracy, errors; per game
+    assert [s.value for s in app.subheader] == [
+        "Analyse older games", "By month", "Accuracy per analysed game",
+    ]  # fmt: skip
+    assert views(fake_api) == {"overview", "accuracy", "accuracy-by-month"}
 
 
 def test_analyse_all_starts_shows_progress_and_stops(fake_api: FakeApi) -> None:
@@ -197,6 +208,24 @@ def test_nothing_left_to_analyse(fake_api: FakeApi) -> None:
     app = run("me", page=accuracy_script)
     assert "Every game is analysed." in [c.value for c in app.caption]
     assert len(app.button) == 0
+
+
+def test_monthly_charts_show_months_with_analysed_games_only() -> None:
+    from dashboard.accuracy_page import accuracy_by_month_chart, errors_by_month_chart
+    from dashboard.tables import monthly_frame
+
+    frame = monthly_frame(STATS["accuracy-by-month"])
+    assert frame["month"].dt.strftime("%Y-%m").tolist() == ["2026-11"]  # October: none analysed
+
+    accuracy = accuracy_by_month_chart(frame).to_dict()
+    assert {layer["mark"]["type"] for layer in accuracy["layer"]} == {"line", "circle"}
+    errors = errors_by_month_chart(frame).to_dict()
+    assert errors["encoding"]["color"]["sort"] == ["inaccuracies", "mistakes", "blunders"]
+    for spec in (accuracy["layer"][0], errors):  # month ticks only, labelled "Nov '26"
+        axis = spec["encoding"]["x"]["axis"]
+        assert axis["tickCount"] == {"interval": "month", "step": 1}
+        assert axis["format"] == "%b '%y"
+    assert accuracy["layer"][0]["encoding"]["y"]["scale"]["domain"] == [0, 100]
 
 
 def test_sidebar_groups_statistics_and_games() -> None:

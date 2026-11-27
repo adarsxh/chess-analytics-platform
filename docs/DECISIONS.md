@@ -964,3 +964,31 @@ knows its engine's exact version (ADR-025).
   again.
 - (−) Thousands of job rows per player; fine for Postgres, and finished rows can be pruned
   later.
+
+## ADR-029: Accuracy trend as calendar months, not a rolling average
+
+- **Status:** Accepted · **Date:** 2026-11-28
+
+### Context
+V2 adds accuracy over time. Two shapes were considered: a rolling average over the last N
+games, or one point per calendar month. The user plays for fun rather than training
+towards a goal, so the question is "how did I play in each period", not "am I improving".
+
+### Decision
+- **One row per calendar month (UTC)** with games: `GET .../stats/accuracy-by-month`,
+  with the usual filters. Accuracy and error rates are computed exactly as in the summary
+  (ADR-026), over that month's analysed games, so a month and the headline never disagree;
+  each month carries its coverage (analysed of played).
+- Months with games but none analysed are returned with no accuracy (not zero), and the
+  dashboard leaves them out.
+- The chart uses the full 0–100 scale (like the per-game chart) and month-only ticks; dot
+  size shows how many games a month's point rests on.
+
+### Alternatives
+- **Rolling average over N games:** smooth, and every point is the same amount of play,
+  but it answers a trend question the user isn't asking, and its window is arbitrary.
+- **Weekly points:** too few games per week for most players.
+
+### Consequences
+- (+) Easy to read and to compare with memory ("last July I played a lot of bullet").
+- (−) Months with few analysed games are noisy; the dot size and caption say so.

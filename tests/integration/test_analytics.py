@@ -262,3 +262,43 @@ def test_no_analysed_games(session_factory, stats) -> None:
     assert quality["coverage"]["analysed_games"] == 0
     assert quality["summary"] == {"accuracy": None, "inaccuracies_per_game": None,
                                   "mistakes_per_game": None, "blunders_per_game": None}  # fmt: skip
+
+
+def test_accuracy_by_month_groups_games_by_utc_month(session_factory, stats) -> None:
+    september = [play(session_factory, when=datetime(2026, 9, d, 12, tzinfo=UTC)) for d in (3, 9)]
+    last_of_october = play(session_factory, when=datetime(2026, 10, 31, 23, 30, tzinfo=UTC))
+    first_of_november = play(session_factory, when=datetime(2026, 11, 1, 0, 30, tzinfo=UTC))
+    blitz = play(session_factory, when=datetime(2026, 11, 5, tzinfo=UTC),
+                 time_class=TimeClass.BLITZ)  # fmt: skip
+    clean, sloppy = [("best", "0")] * 4, [("blunder", "40"), ("best", "0")] * 2
+    analyse(session_factory, september[0], clean)
+    analyse(session_factory, last_of_october, sloppy)
+    analyse(session_factory, blitz, clean)
+    player = me_id(session_factory)
+    quality = {g["game_id"]: g for g in stats.game_quality(player)["games"]}
+
+    months = stats.accuracy_by_month(player)
+
+    assert [(m["month"], m["total_games"], m["analysed_games"]) for m in months] == [
+        (date(2026, 9, 1), 2, 1),
+        (date(2026, 10, 1), 1, 1),  # 23:30 UTC on the 31st is still October
+        (date(2026, 11, 1), 2, 1),
+    ]
+    september_row, october_row, november_row = months
+    assert september_row["accuracy"] == quality[september[0]]["accuracy"]  # same definition
+    assert (september_row["percent"], september_row["blunders_per_game"]) == (
+        Decimal("50.0"), Decimal("0.00"),
+    )  # fmt: skip
+    assert october_row["blunders_per_game"] == Decimal("2.00")  # both White moves blundered
+    assert first_of_november not in quality and november_row["analysed_games"] == 1
+
+    rapid = stats.accuracy_by_month(player, Filters(time_class="rapid"))
+    assert [(m["month"], m["total_games"], m["analysed_games"]) for m in rapid][-1] == (
+        date(2026, 11, 1), 1, 0,
+    )  # fmt: skip
+    assert rapid[-1]["accuracy"] is None  # games, but none analysed
+
+
+def test_accuracy_by_month_without_games(session_factory, stats) -> None:
+    play(session_factory)
+    assert stats.accuracy_by_month(me_id(session_factory), Filters(time_class="bullet")) == []
