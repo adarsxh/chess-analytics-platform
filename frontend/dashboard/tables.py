@@ -60,6 +60,40 @@ def monthly_frame(months: list[dict[str, Any]]) -> pd.DataFrame:
     return frame.sort_values("month", ignore_index=True)
 
 
+PHASES = ["opening", "middlegame", "endgame"]
+POSITIONS = ["winning", "equal", "losing"]
+BANDS = {
+    "much_lower": "25+ lower",
+    "lower": "10–24 lower",
+    "similar": "within ±9",
+    "higher": "10–24 higher",
+    "much_higher": "25+ higher",
+}
+
+
+def errors_per_100_frame(rows: list[dict[str, Any]], key: str) -> pd.DataFrame:
+    """One row per (bucket, error kind) with its rate per 100 moves, for grouped bars.
+    Buckets without moves are kept (rate 0) so every chart shows all three buckets."""
+    records = [
+        {key: row[key], "kind": kind, "per_100": float(row[f"{kind}_per_100"] or 0),
+         "moves": row["moves"],
+         "accuracy": float(row["accuracy"]) if row["accuracy"] is not None else None}
+        for row in rows
+        for kind in ERROR_KINDS
+    ]  # fmt: skip
+    return pd.DataFrame(records, columns=[key, "kind", "per_100", "moves", "accuracy"])
+
+
+def opponents_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    """One row per opponent band, weakest opponents first, ready for a table."""
+    frame = pd.DataFrame(rows, columns=["band", "games", "score_percent", "analysed_games",
+                                        "accuracy", "blunders_per_game"])  # fmt: skip
+    frame["band"] = frame["band"].map(BANDS)
+    for column in ("score_percent", "accuracy", "blunders_per_game"):
+        frame[column] = pd.to_numeric(frame[column])
+    return frame
+
+
 EVAL_CLAMP = 10  # pawns; beyond this the game is decided and the chart would flatten
 LABEL_SYMBOLS = {"blunder": "??", "mistake": "?", "inaccuracy": "?!", "best": "★",
                  "excellent": "!", "good": "", "forced": "□"}  # fmt: skip

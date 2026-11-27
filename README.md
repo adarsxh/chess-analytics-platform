@@ -9,7 +9,7 @@ blunders and mistakes) through an API and a dashboard.
 > **Status:** V1 complete. Chess.com ingestion, processing into a clean model, background
 > jobs, an HTTP API, Stockfish analysis with move classification and accuracy, and a
 > Streamlit dashboard (Phases 1–7). V2 in progress: Phase 8 (dashboard pages) and
-> Phase 9 ("Analyse all") and Phase 10 (accuracy by month) done; see the roadmap.
+> Phases 9–11 ("Analyse all", accuracy by month, weaknesses) done; see the roadmap.
 
 ## Architecture at a glance
 
@@ -144,6 +144,7 @@ versioned under `/api/v1`; `/health` and `/health/ready` are not.
 | GET | `/api/v1/players/{username}/stats/openings` | Most played openings per colour (`group_by=family\|name`, `limit`) |
 | GET | `/api/v1/players/{username}/stats/accuracy` | Accuracy and errors per analysed game, with coverage |
 | GET | `/api/v1/players/{username}/stats/accuracy-by-month` | Accuracy and errors per calendar month (UTC), with each month's coverage |
+| GET | `/api/v1/players/{username}/stats/weaknesses` | Error rates by game phase and by position, results and accuracy by opponent strength |
 | POST | `/api/v1/games/{game_id}/analysis` | Queue a Stockfish analysis → `202` + job (duplicates return the same job) |
 | GET | `/api/v1/games/{game_id}/analysis` | Evaluation of every position and a label for every move (`404` until analysed) |
 | POST | `/api/v1/players/{username}/analysis` | "Analyse all": queue every game not yet analysed, behind other work → `202` + job |
@@ -159,7 +160,8 @@ A Streamlit app in `frontend/` (its own project and image; it reaches the backen
 through the API, ADR-005 / ADR-027). Pick a player and optional time class / dates in the
 sidebar; they apply to every page. **Statistics** pages: *Overview* (headline numbers,
 results by time class and colour, rating history), *Openings* (results per opening, as White
-and as Black) and *Accuracy* (accuracy, error rates, both by month and per analysed game, with how many
+and as Black) and *Accuracy* (accuracy, error rates by month, where errors happen (game phase, winning
+or losing, opponent strength) and per analysed game, with how many
 games are analysed, and *Analyse all* / *Stop* for the older games, with live progress).
 **Games**: the player's games; select one to open it. **Game**: both sides'
 accuracy, the evaluation over the game with errors marked, every move with its label, and

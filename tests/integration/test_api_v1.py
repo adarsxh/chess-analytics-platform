@@ -374,7 +374,8 @@ def test_invalid_stats_filters_are_422(client: TestClient, session_factory, quer
 
 
 @pytest.mark.parametrize(
-    "view", ["overview", "rating-history", "openings", "accuracy", "accuracy-by-month"]
+    "view",
+    ["overview", "rating-history", "openings", "accuracy", "accuracy-by-month", "weaknesses"],
 )
 def test_stats_of_an_unknown_player_are_404(client: TestClient, view: str) -> None:
     assert client.get(f"/api/v1/players/nobody_here/stats/{view}").status_code == 404
@@ -424,6 +425,23 @@ def test_stats_accuracy_by_month(client: TestClient, session_factory) -> None:
     assert month["blunders_per_game"] == overall["blunders_per_game"]
     after = client.get("/api/v1/players/adarsxh1/stats/accuracy-by-month?since=2026-11-01")
     assert after.json() == []
+
+
+def test_stats_weaknesses(client: TestClient, session_factory) -> None:
+    add_game(session_factory, minutes_ago=2)  # my first game: no pre-game rating, left out
+    analysed = add_game(session_factory, minutes_ago=1)  # opponent 1401 vs my 1500 before
+    analyse_game(analysed, engine=FakeEngine(), session_factory=session_factory)
+
+    body = client.get("/api/v1/players/adarsxh1/stats/weaknesses").json()
+
+    assert [r["phase"] for r in body["by_phase"]] == ["opening", "middlegame", "endgame"]
+    assert [r["position"] for r in body["by_position"]] == ["winning", "equal", "losing"]
+    assert sum(r["moves"] for r in body["by_phase"]) == sum(r["moves"] for r in body["by_position"])
+    much_lower = next(r for r in body["by_opponent"] if r["band"] == "much_lower")
+    assert (much_lower["games"], much_lower["analysed_games"], much_lower["score_percent"]) == (
+        1, 1, "100.0",
+    )  # fmt: skip
+    assert sum(r["games"] for r in body["by_opponent"]) == 1
 
 
 def test_business_endpoints_are_versioned_health_is_not(client: TestClient) -> None:

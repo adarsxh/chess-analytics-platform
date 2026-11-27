@@ -16,12 +16,14 @@ from typing import Any, Literal
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from chess_analytics.analytics import weaknesses as weak
 from chess_analytics.analytics.accuracy import (
     ACCURACY_DECAY,
     ACCURACY_OFFSET,
     ACCURACY_SCALE,
     HARMONIC_FLOOR,
 )
+from chess_analytics.classification.moves import CP_CLAMP, WIN_CURVE_SLOPE
 
 # Chess.com names every variation ("Scotch Game 3...d6"): 660 names over 2,400 games. The
 # family is the name up to its first opening keyword ("Scotch Game"): 52 families. A
@@ -283,6 +285,172 @@ FROM player_games GROUP BY 1 ORDER BY 1
             }
             for row in totals
         ]
+
+    # ------------------------------------------------------------- weaknesses ---
+
+    def weaknesses(self, player_id: int, filters: Filters = ALL_GAMES) -> dict[str, Any]:
+        """Where errors happen (ADR-030, definitions in analytics/weaknesses.py): the
+        player's analysed moves by game phase and by position, and games by opponent
+        strength. Moves exclude forced ones, as for accuracy."""
+        cte, params = self._player_games(player_id, filters)
+        rows = self._session.execute(
+            text(f"""
+WITH {cte},
+{_CHOSEN_ANALYSES},
+player_moves AS (
+    SELECT mc.ply, mc.label, m.color, m.initial_fen,
+           greatest(0, least(100, :acc_scale * exp(-:acc_decay * mc.eval_loss) + :acc_offset))
+               AS accuracy,
+           split_part(coalesce(prev.fen_after, m.initial_fen), ' ', 1) AS board_before,
+           pe.score_cp, pe.mate_in
+    FROM labelled AS l
+    JOIN player_games AS m ON m.game_id = l.game_id
+    JOIN analysis.move_classifications AS mc
+      ON mc.game_analysis_id = l.analysis_id AND mc.classifier_version = l.classifier_version
+    -- The position before the move: its board, and the engine's view of it.
+    LEFT JOIN core.game_moves AS prev ON prev.game_id = l.game_id AND prev.ply = mc.ply - 1
+    JOIN analysis.position_evaluations AS pe
+      ON pe.game_analysis_id = l.analysis_id AND pe.ply = mc.ply - 1 AND pe.pv_rank = 1
+    WHERE ((mc.ply % 2 = 1) = (split_part(m.initial_fen, ' ', 2) = 'w')) = (m.color = 'white')
+      AND mc.label <> 'forced'
+),
+bucketed AS (
+    SELECT label, accuracy,
+           CASE
+               WHEN length(board_before)
+                    - length(regexp_replace(board_before, '[QRBNqrbn]', '', 'g'))
+                    <= :endgame_pieces THEN 'endgame'
+               WHEN (ply + CASE WHEN split_part(initial_fen, ' ', 2) = 'w' THEN 1 ELSE 2 END) / 2
+                    <= :opening_moves THEN 'opening'
+               ELSE 'middlegame'
+           END AS phase,
+           CASE
+               WHEN mover_win >= :winning_from THEN 'winning'
+               WHEN mover_win <= :losing_up_to THEN 'losing'
+               ELSE 'equal'
+           END AS position
+    FROM (
+        SELECT *,
+               CASE WHEN color = 'white' THEN white_win ELSE 100 - white_win END AS mover_win
+        FROM (
+            SELECT *,
+                   CASE
+                       WHEN mate_in > 0 THEN 100.0
+                       WHEN mate_in < 0 THEN 0.0
+                       -- mate_in 0 can't precede a move (the game would be over)
+                       ELSE 50 + 50 * (2 / (1 + exp(-:slope
+                                 * greatest(-:cp_clamp, least(:cp_clamp, score_cp)))) - 1)
+                   END AS white_win
+            FROM player_moves
+        ) AS w
+    ) AS m
+)
+SELECT GROUPING(phase) = 1 AS by_position, coalesce(phase, position) AS bucket,
+       count(*) AS moves,
+       count(*) FILTER (WHERE label = 'inaccuracy') AS inaccuracies,
+       count(*) FILTER (WHERE label = 'mistake') AS mistakes,
+       count(*) FILTER (WHERE label = 'blunder') AS blunders,
+       round(((avg(accuracy) + count(*) / sum(1 / greatest(accuracy, :harmonic_floor))) / 2
+             )::numeric, 1) AS accuracy
+FROM bucketed
+GROUP BY GROUPING SETS ((phase), (position))
+"""),
+            params
+            | {
+                "acc_scale": ACCURACY_SCALE,
+                "acc_decay": ACCURACY_DECAY,
+                "acc_offset": ACCURACY_OFFSET,
+                "harmonic_floor": HARMONIC_FLOOR,
+                "endgame_pieces": weak.ENDGAME_MAX_PIECES,
+                "opening_moves": weak.OPENING_MOVES,
+                "winning_from": weak.WINNING_FROM,
+                "losing_up_to": weak.LOSING_UP_TO,
+                "slope": WIN_CURVE_SLOPE,
+                "cp_clamp": CP_CLAMP,
+            },  # fmt: skip
+        ).all()
+        by_phase = {r.bucket: r for r in rows if not r.by_position}
+        by_position = {r.bucket: r for r in rows if r.by_position}
+        return {
+            "by_phase": [_move_bucket("phase", p, by_phase.get(p)) for p in weak.PHASES],
+            "by_position": [
+                _move_bucket("position", p, by_position.get(p)) for p in weak.POSITIONS
+            ],
+            "by_opponent": self._by_opponent(player_id, filters, cte, params),
+        }
+
+    def _by_opponent(
+        self, player_id: int, filters: Filters, cte: str, params: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Results (all games) and accuracy (analysed games) per opponent-strength band,
+        on estimated pre-game ratings (analytics/weaknesses.py)."""
+        rows = self._session.execute(
+            text(f"""
+WITH previous AS (
+    -- Over ALL the player's games, before any filter: the game before a filtered-in
+    -- game may itself be filtered out (e.g. by date), and still gives the rating before.
+    SELECT gp.game_id,
+           lag(gp.rating_after) OVER (PARTITION BY g.time_class ORDER BY g.end_time, g.id)
+               AS rating_before
+    FROM core.game_players AS gp
+    JOIN core.games AS g ON g.id = gp.game_id
+    WHERE gp.player_id = :player_id
+),
+{cte}
+SELECT m.game_id, m.outcome,
+       (opp.rating_after + (m.rating_after - p.rating_before)) - p.rating_before AS difference
+FROM player_games AS m
+JOIN previous AS p ON p.game_id = m.game_id
+JOIN core.game_players AS opp ON opp.game_id = m.game_id AND opp.color <> m.color
+WHERE p.rating_before IS NOT NULL AND m.rating_after IS NOT NULL
+  AND opp.rating_after IS NOT NULL
+"""),
+            params,
+        ).all()
+        band_of = {row.game_id: weak.rating_band(row.difference) for row in rows}
+        quality = self.game_quality(player_id, filters)["games"]
+        result = []
+        for band, _ in weak.RATING_BANDS:
+            outcomes = [row.outcome for row in rows if band_of[row.game_id] == band]
+            record = _Record(
+                games=len(outcomes),
+                wins=outcomes.count("win"),
+                draws=outcomes.count("draw"),
+                losses=outcomes.count("loss"),
+            )
+            analysed = [g for g in quality if band_of.get(g["game_id"]) == band]
+            result.append({
+                "band": band,
+                **_record(record),
+                "analysed_games": len(analysed),
+                **_summary(analysed),
+            })  # fmt: skip
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class _Record:
+    games: int
+    wins: int
+    draws: int
+    losses: int
+
+
+def _move_bucket(key: str, name: str, row: Any) -> dict[str, Any]:
+    """Error rates per 100 of the player's moves in this bucket (buckets differ in size)."""
+    moves = row.moves if row is not None else 0
+
+    def per_100(count: int) -> Decimal | None:
+        return round(Decimal(count) * 100 / moves, 1) if moves else None
+
+    return {
+        key: name,
+        "moves": moves,
+        "accuracy": row.accuracy if row is not None else None,
+        "inaccuracies_per_100": per_100(row.inaccuracies) if row else None,
+        "mistakes_per_100": per_100(row.mistakes) if row else None,
+        "blunders_per_100": per_100(row.blunders) if row else None,
+    }
 
 
 def _utc_month(moment: datetime) -> date:
