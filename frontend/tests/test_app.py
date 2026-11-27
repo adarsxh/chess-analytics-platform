@@ -37,6 +37,29 @@ STATS = {
          "accuracy": "78.4", "inaccuracies_per_game": "2.00", "mistakes_per_game": "0.00",
          "blunders_per_game": "1.00"},
     ],
+    "weaknesses": {
+        "by_phase": [
+            {"phase": "opening", "moves": 10, "accuracy": "90.1", "inaccuracies_per_100": "10.0",
+             "mistakes_per_100": "0.0", "blunders_per_100": "0.0"},
+            {"phase": "middlegame", "moves": 15, "accuracy": "70.2",
+             "inaccuracies_per_100": "6.7", "mistakes_per_100": "0.0", "blunders_per_100": "6.7"},
+            {"phase": "endgame", "moves": 0, "accuracy": None, "inaccuracies_per_100": None,
+             "mistakes_per_100": None, "blunders_per_100": None},
+        ],
+        "by_position": [
+            {"position": p, "moves": n, "accuracy": "80.0", "inaccuracies_per_100": "4.0",
+             "mistakes_per_100": "0.0", "blunders_per_100": "4.0"}
+            for p, n in (("winning", 5), ("equal", 15), ("losing", 5))
+        ],
+        "by_opponent": [
+            {"band": b, "games": 1 if b == "similar" else 0, "wins": 1 if b == "similar" else 0,
+             "draws": 0, "losses": 0, "score_percent": "100.0" if b == "similar" else None,
+             "analysed_games": 1 if b == "similar" else 0,
+             "accuracy": "78.4" if b == "similar" else None, "inaccuracies_per_game": None,
+             "mistakes_per_game": None, "blunders_per_game": "1.00" if b == "similar" else None}
+            for b in ("much_lower", "lower", "similar", "higher", "much_higher")
+        ],
+    },
 }  # fmt: skip
 
 
@@ -177,11 +200,17 @@ def test_accuracy_page_shows_error_rates_and_games(fake_api: FakeApi) -> None:
         "Mistakes / game": "0.00", "Blunders / game": "1.00",
     }  # fmt: skip
     assert "Covers 1 of 2 games (50.0 %)" in app.caption[0].value
-    assert len(app.get("vega_lite_chart")) == 3  # by month: accuracy, errors; per game
+    assert len(app.get("vega_lite_chart")) == 5  # by month x2, by phase/position, per game
     assert [s.value for s in app.subheader] == [
-        "Analyse older games", "By month", "Accuracy per analysed game",
+        "Analyse older games", "By month", "Where the errors happen",
+        "Accuracy per analysed game",
     ]  # fmt: skip
-    assert views(fake_api) == {"overview", "accuracy", "accuracy-by-month"}
+    opponents = app.dataframe[0].value
+    assert opponents["band"].tolist() == [
+        "25+ lower", "10–24 lower", "within ±9", "10–24 higher", "25+ higher",
+    ]  # fmt: skip
+    assert opponents["games"].tolist() == [0, 0, 1, 0, 0]
+    assert views(fake_api) == {"overview", "accuracy", "accuracy-by-month", "weaknesses"}
 
 
 def test_analyse_all_starts_shows_progress_and_stops(fake_api: FakeApi) -> None:
@@ -226,6 +255,21 @@ def test_monthly_charts_show_months_with_analysed_games_only() -> None:
         assert axis["tickCount"] == {"interval": "month", "step": 1}
         assert axis["format"] == "%b '%y"
     assert accuracy["layer"][0]["encoding"]["y"]["scale"]["domain"] == [0, 100]
+
+
+def test_error_rate_charts_keep_every_bucket_in_order() -> None:
+    from dashboard.accuracy_page import errors_per_100_chart
+    from dashboard.tables import PHASES, errors_per_100_frame
+
+    rows = STATS["weaknesses"]["by_phase"]
+    frame = errors_per_100_frame(rows, "phase")
+    assert len(frame) == 9  # 3 phases x 3 error kinds, the empty endgame included as 0
+    endgame = frame[frame["phase"] == "endgame"]
+    assert endgame["per_100"].tolist() == [0, 0, 0] and endgame["moves"].tolist() == [0, 0, 0]
+
+    spec = errors_per_100_chart(rows, "phase", PHASES, "By game phase").to_dict()
+    assert spec["encoding"]["x"]["sort"] == ["opening", "middlegame", "endgame"]
+    assert spec["encoding"]["xOffset"]["sort"] == ["inaccuracies", "mistakes", "blunders"]
 
 
 def test_sidebar_groups_statistics_and_games() -> None:

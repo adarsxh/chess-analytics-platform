@@ -1,5 +1,5 @@
 """Player statistics (ADR-026): results, rating history, openings, accuracy (per game and
-per month).
+per month), weaknesses (ADR-030).
 
 Every endpoint takes the same filters, so a dashboard showing several of them describes
 one consistent set of games. Accuracy and error statistics include their coverage: how
@@ -21,6 +21,7 @@ from chess_analytics.api.schemas import (
     OverviewStats,
     RatingPoint,
     TimeClass,
+    Weaknesses,
 )
 from chess_analytics.storage.repositories.queries import GameQueries
 
@@ -113,3 +114,18 @@ def accuracy_by_month(
     player_id = _player_id(session, username, platform)
     rows = PlayerAnalytics(session).accuracy_by_month(player_id, filters)
     return [MonthlyQuality(**row) for row in rows]
+
+
+@router.get(
+    "/weaknesses",
+    response_model=Weaknesses,
+    summary="Errors by game phase, by position, and results by opponent strength",
+)
+def weaknesses(
+    username: Username, session: SessionDep, filters: FiltersDep,
+    platform: PlatformParam = "chesscom",
+) -> Weaknesses:  # fmt: skip
+    """Phases and positions are per move (definitions: ADR-030), with error rates per 100
+    moves because the buckets differ in size; opponent bands are per game."""
+    player_id = _player_id(session, username, platform)
+    return Weaknesses(**PlayerAnalytics(session).weaknesses(player_id, filters))

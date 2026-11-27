@@ -5,11 +5,21 @@ import streamlit as st
 
 from dashboard import analyse_all
 from dashboard.stats import MONTH_YEAR, load, time_axis
-from dashboard.tables import ERROR_KINDS, accuracy_frame, monthly_frame
+from dashboard.tables import (
+    ERROR_KINDS,
+    PHASES,
+    POSITIONS,
+    accuracy_frame,
+    errors_per_100_frame,
+    monthly_frame,
+    opponents_frame,
+)
+
+ERROR_COLORS = alt.Scale(domain=ERROR_KINDS, range=["#e3b341", "#e07b39", "#c4524a"])
 
 
 def render() -> None:
-    loaded = load("Accuracy", "accuracy", "accuracy-by-month")
+    loaded = load("Accuracy", "accuracy", "accuracy-by-month", "weaknesses")
     if loaded is None:
         return
     accuracy = loaded["accuracy"]
@@ -17,6 +27,7 @@ def render() -> None:
     analyse_all.show_stopped()
     analyse_all.render(loaded.username)
     _by_month(loaded["accuracy-by-month"])
+    _weaknesses(loaded["weaknesses"])
     _per_game(accuracy)
 
 
@@ -94,10 +105,7 @@ def errors_by_month_chart(frame) -> alt.Chart:
         value_name="per_game",
     )
     long["kind"] = long["kind"].str.removesuffix("_per_game")
-    color = alt.Color(
-        "kind:N", title=None, sort=ERROR_KINDS,
-        scale=alt.Scale(domain=ERROR_KINDS, range=["#e3b341", "#e07b39", "#c4524a"]),
-    )  # fmt: skip
+    color = alt.Color("kind:N", title=None, sort=ERROR_KINDS, scale=ERROR_COLORS)
     return (
         alt.Chart(long)
         .mark_line(point=True)
@@ -108,6 +116,71 @@ def errors_by_month_chart(frame) -> alt.Chart:
             tooltip=[*_month_tooltip(), "kind", alt.Tooltip("per_game:Q", title="Per game")],
         )
         .properties(title="Errors per game")
+    )
+
+
+def _weaknesses(weaknesses: dict) -> None:
+    st.subheader("Where the errors happen")
+    if not any(row["moves"] for row in weaknesses["by_phase"]):
+        st.caption("No analysed games yet.")
+    else:
+        left, right = st.columns(2)
+        left.altair_chart(
+            errors_per_100_chart(weaknesses["by_phase"], "phase", PHASES, "By game phase"),
+            width="stretch",
+        )
+        right.altair_chart(
+            errors_per_100_chart(
+                weaknesses["by_position"], "position", POSITIONS, "By position before the move"
+            ),
+            width="stretch",
+        )
+        st.caption(
+            "Per 100 of your moves, so phases of different length compare fairly. Opening = "
+            "your first 10 moves; endgame = 6 or fewer queens, rooks, bishops and knights "
+            "left. Winning / losing = the engine gave you ≥ 70 % / ≤ 30 % before the move. "
+            "Errors are measured as lost win chance, so a lost position has little left to "
+            "lose and a winning one the most: costly errors cluster where you're ahead."
+        )
+    st.markdown("**By opponent strength** (their rating minus yours, before the game)")
+    st.dataframe(
+        opponents_frame(weaknesses["by_opponent"]),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "band": "Opponent",
+            "games": st.column_config.NumberColumn(
+                "Games", help="Your first game in each time class has no pre-game rating"
+            ),
+            "score_percent": st.column_config.ProgressColumn(
+                "Score", format="%.1f %%", min_value=0, max_value=100
+            ),
+            "analysed_games": "Analysed",
+            "accuracy": st.column_config.NumberColumn("Accuracy", format="%.1f %%"),
+            "blunders_per_game": st.column_config.NumberColumn("Blunders / game", format="%.2f"),
+        },
+    )
+
+
+def errors_per_100_chart(rows: list[dict], key: str, order: list[str], title: str) -> alt.Chart:
+    frame = errors_per_100_frame(rows, key)
+    return (
+        alt.Chart(frame)
+        .mark_bar()
+        .encode(
+            x=alt.X(f"{key}:N", sort=order, title=None, axis=alt.Axis(labelAngle=0)),
+            xOffset=alt.XOffset("kind:N", sort=ERROR_KINDS),
+            y=alt.Y("per_100:Q", title="Per 100 moves"),
+            color=alt.Color("kind:N", title=None, sort=ERROR_KINDS, scale=ERROR_COLORS),
+            tooltip=[
+                alt.Tooltip(f"{key}:N", title=key.capitalize()),
+                alt.Tooltip("kind:N", title="Error"),
+                alt.Tooltip("per_100:Q", title="Per 100 moves"),
+                alt.Tooltip("moves:Q", title="Your moves"),
+                alt.Tooltip("accuracy:Q", title="Accuracy %"),
+            ],
+        )
+        .properties(title=title)
     )
 
 

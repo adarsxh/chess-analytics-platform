@@ -992,3 +992,41 @@ towards a goal, so the question is "how did I play in each period", not "am I im
 ### Consequences
 - (+) Easy to read and to compare with memory ("last July I played a lot of bullet").
 - (−) Months with few analysed games are noisy; the dot size and caption say so.
+
+## ADR-030: Weaknesses: game phase, position and opponent strength
+
+- **Status:** Accepted · **Date:** 2026-11-28
+
+### Context
+V2 asks *where* a player's errors happen. Each grouping needs a definition, and each was
+checked against the main user's real data (12,500 analysed moves) before it was fixed.
+
+### Decision
+Definitions live in `analytics/weaknesses.py` (Python reference functions, which the tests
+check the SQL against); `GET .../stats/weaknesses` takes the usual filters.
+- **Game phase**, per move, from the position before it: *endgame* when 6 or fewer queens,
+  rooks, bishops and knights are left (Lichess's rule), checked first; *opening* for the
+  player's first 10 moves; *middlegame* otherwise. Counted from the stored FEN.
+- **Position**, per move: the mover's win chance before it, on the classifier's curve
+  (ADR-024): winning ≥ 70 %, losing ≤ 30 %.
+- Moves exclude forced ones; buckets report accuracy (as for a game) and errors **per 100
+  moves**, because phases differ in length.
+- **Opponent strength**, per game, on *estimated pre-game* ratings: the player's rating
+  after their previous game in that time class, and the opponent's post-game rating moved
+  back by the player's change. Bands ≤ −25, −24…−10, ±9, 10…24, ≥ 25. The previous game is
+  looked up over all games, before filters. First games in a time class are left out.
+
+### Alternatives
+- **Phase by move number only:** simpler, but misses early simplifications; **by material
+  only:** no clear opening signal.
+- **±50 / ±200 bands (first choice):** 98 % of the user's games fell in ±50 (Chess.com's
+  matchmaking keeps gaps small).
+- **Post-game ratings:** a win moves the gap ~20 points towards "weaker opponent" (real
+  data: wins −20.8, losses +17.3 on average; estimated pre-game: −3.4 and −0.4), which
+  narrow bands would turn into fake results.
+
+### Consequences
+- (+) Answers "where do I go wrong" with definitions a player can check.
+- (−) Error rates by position are lopsided by construction: lost win chance can't be large
+  in a lost position, so "losing" shows few errors. The dashboard says so.
+- (−) Pre-game ratings are an estimate (Glicko is not exactly zero-sum).

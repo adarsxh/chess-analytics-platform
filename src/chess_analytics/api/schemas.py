@@ -286,6 +286,43 @@ class MonthlyQuality(Coverage, QualitySummary):
     month: date = Field(description="First day of the calendar month (UTC)")
 
 
+class MoveBucket(BaseModel):
+    moves: int = Field(description="The player's analysed moves here (forced moves excluded)")
+    accuracy: Decimal | None = Field(description="Over these moves, as for a game (ADR-026)")
+    inaccuracies_per_100: Decimal | None = Field(description="Per 100 of these moves")
+    mistakes_per_100: Decimal | None
+    blunders_per_100: Decimal | None
+
+
+class PhaseQuality(MoveBucket):
+    phase: Literal["opening", "middlegame", "endgame"]
+
+
+class PositionQuality(MoveBucket):
+    position: Literal["winning", "equal", "losing"] = Field(
+        description="Before the move, by the mover's win chance: ≥ 70 %, between, ≤ 30 %"
+    )
+
+
+class OpponentQuality(QualitySummary):
+    band: Literal["much_lower", "lower", "similar", "higher", "much_higher"] = Field(
+        description="Opponent minus player, estimated before the game (ADR-030): ≤ −25, "
+        "−24…−10, ±9, 10…24, ≥ 25"
+    )
+    games: int = Field(description="Games with an estimate (not a first game in a time class)")
+    wins: int
+    draws: int
+    losses: int
+    score_percent: Decimal | None
+    analysed_games: int = Field(description="The accuracy and error rates cover these")
+
+
+class Weaknesses(BaseModel):
+    by_phase: list[PhaseQuality]
+    by_position: list[PositionQuality]
+    by_opponent: list[OpponentQuality]
+
+
 class AccuracyStats(BaseModel):
     coverage: Coverage
     summary: QualitySummary
