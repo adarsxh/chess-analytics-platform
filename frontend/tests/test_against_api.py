@@ -27,7 +27,7 @@ def real_api(monkeypatch: pytest.MonkeyPatch) -> None:
     st.cache_data.clear()
 
 
-def test_statistics_page_renders_real_responses() -> None:
+def test_overview_page_renders_real_responses() -> None:
     app = AppTest.from_file(APP, default_timeout=30)
     app.session_state["username"] = PLAYER
     app.run()
@@ -36,7 +36,34 @@ def test_statistics_page_renders_real_responses() -> None:
     metrics = {m.label: m.value for m in app.metric}
     assert metrics["Games"] == "2"
     assert "cover 2 of 2 games" in app.caption[0].value
-    assert len(app.get("vega_lite_chart")) == 4
+    assert len(app.get("vega_lite_chart")) == 3
+
+
+def openings_script() -> None:
+    from dashboard import openings_page
+
+    openings_page.render()
+
+
+def accuracy_script() -> None:
+    from dashboard import accuracy_page
+
+    accuracy_page.render()
+
+
+def test_openings_and_accuracy_pages_render_real_responses() -> None:
+    openings = AppTest.from_function(openings_script, default_timeout=30)
+    openings.session_state["username"] = PLAYER
+    openings.run()
+    assert not openings.exception and not openings.error and not openings.warning
+    assert len(openings.dataframe) >= 1
+
+    accuracy = AppTest.from_function(accuracy_script, default_timeout=30)
+    accuracy.session_state["username"] = PLAYER
+    accuracy.run()
+    assert not accuracy.exception and not accuracy.error and not accuracy.warning
+    assert "Covers 2 of 2 games" in accuracy.caption[0].value
+    assert len(accuracy.get("vega_lite_chart")) == 1
 
 
 def games_script() -> None:

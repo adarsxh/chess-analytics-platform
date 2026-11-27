@@ -8,7 +8,8 @@ blunders and mistakes) through an API and a dashboard.
 
 > **Status:** V1 complete. Chess.com ingestion, processing into a clean model, background
 > jobs, an HTTP API, Stockfish analysis with move classification and accuracy, and a
-> Streamlit dashboard (Phases 1–7). Next: V2 (see the roadmap).
+> Streamlit dashboard (Phases 1–7). V2 in progress: Phase 8 (dashboard pages) done; see
+> the roadmap.
 
 ## Architecture at a glance
 
@@ -26,7 +27,7 @@ talks to the backend only over HTTP.
 | Version | Focus |
 |---|---|
 | V1 | Chess.com ingestion, Stockfish analysis, basic dashboard |
-| V2 | Better analytics: openings, weaknesses, time controls, accuracy trends, results by opponent country |
+| V2 | Better analytics: a page per topic, then analysing all games, accuracy trends, weaknesses, time management, results by opponent country, Brilliant / Great moves (MultiPV 2), deeper openings (Phases 8–15) |
 | V3 | Multiple platforms through additional ingestion adapters |
 | V4 | User accounts, auth, user-specific analytics, background processing |
 | V5 | Cloud deployment, managed DB, scalable workers, monitoring |
@@ -141,8 +142,10 @@ Accuracy is this project's own (ADR-026), so it differs from Chess.com's.
 
 A Streamlit app in `frontend/` (its own project and image; it reaches the backend only
 through the API, ADR-005 / ADR-027). Pick a player and optional time class / dates in the
-sidebar. **Statistics**: results, rating history, openings and accuracy (with how many games
-are analysed). **Games**: the player's games; select one to open it. **Game**: both sides'
+sidebar; they apply to every page. **Statistics** pages: *Overview* (headline numbers,
+results by time class and colour, rating history), *Openings* (results per opening, as White
+and as Black) and *Accuracy* (accuracy, error rates and each analysed game, with how many
+games are analysed). **Games**: the player's games; select one to open it. **Game**: both sides'
 accuracy, the evaluation over the game with errors marked, every move with its label, and
 an *Analyse* button for games outside the latest 20. *Sync from Chess.com* in the sidebar
 queues a sync and follows it until it finishes.
